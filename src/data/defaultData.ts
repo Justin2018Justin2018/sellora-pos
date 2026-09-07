@@ -1,0 +1,520 @@
+import {
+  BusinessProfile,
+  ServiceItem,
+  StockItem,
+  UserAccount,
+  Shop,
+  Transaction,
+  GasTransaction,
+  ElectronicsProduct,
+  ElectronicsSale,
+  Expense,
+  Customer,
+  TaxRule,
+} from '../types/pos';
+
+export const DEFAULT_TAX_RULES: TaxRule[] = [
+  {
+    id: 'tax_vat_16',
+    name: 'Standard VAT (16%)',
+    rate: 16,
+    type: 'inclusive',
+    isDefault: true,
+    description: 'Standard Value Added Tax for taxable goods and services',
+    active: true,
+  },
+  {
+    id: 'tax_lpg_8',
+    name: 'Fuel & LPG VAT (8%)',
+    rate: 8,
+    type: 'inclusive',
+    isDefault: false,
+    description: 'Reduced VAT rate on petroleum and cooking gas',
+    active: true,
+  },
+  {
+    id: 'tax_zero_0',
+    name: 'Zero-Rated (0%)',
+    rate: 0,
+    type: 'inclusive',
+    isDefault: false,
+    description: 'Zero-rated essential supplies',
+    active: true,
+  },
+  {
+    id: 'tax_exempt',
+    name: 'Exempt / Non-Taxable',
+    rate: 0,
+    type: 'inclusive',
+    isDefault: false,
+    description: 'Exempt sales and tax-free services',
+    active: true,
+  },
+];
+
+export const DEFAULT_BUSINESS_PROFILE: BusinessProfile = {
+  id: 'biz_sellora_01',
+  name: 'Sellora POS',
+  subtitle: 'Smart Business & Profit Management System',
+  tagline: 'Your Reliable Retail, Cyber, Gas & Business Solutions',
+  phone: '0711146198',
+  email: 'hesborn.nyakundi495@gmail.com',
+  address: 'Nairobi, Kenya',
+  tinNumber: 'P051234567Z',
+  kraPin: 'P051234567Z',
+  tillNumber: '5432100',
+  currency: 'KSh',
+  currencySymbol: 'KSh',
+  plan: 'BUSINESS',
+  receiptHeader: 'SELLORA POS — NAIROBI',
+  receiptFooter: 'Thank you for choosing Sellora POS. Karibu tena!',
+  receiptNotes: 'Goods & services once sold are non-refundable without receipt.',
+  autoPrintReceipt: false,
+  defaultThermalWidth: '80',
+  lowStockThresholdDefault: 10,
+  enableSoundAlerts: true,
+  adminPassword: 'admin123',
+  // Forces a one-time "set your own PIN" prompt on first run instead of
+  // silently trusting the shipped default forever - see MainApp in
+  // src/App.tsx and verifyAdminPassword in POSContext.tsx.
+  adminPasswordChanged: false,
+  enableTax: true,
+  taxCalculationMode: 'inclusive',
+  defaultTaxRate: 16,
+  taxName: 'VAT (16%)',
+  taxRules: DEFAULT_TAX_RULES,
+};
+
+export const DEFAULT_SHOPS: Shop[] = [
+  {
+    id: 'shop_main',
+    name: 'Sellora Main Branch',
+    location: 'Nairobi Central, Commercial St.',
+    phone: '0711146198',
+    active: true,
+    isMain: true,
+  },
+  {
+    id: 'shop_branch_2',
+    name: 'Sellora Branch 2 (Express)',
+    location: 'Stage Branch, Nairobi',
+    phone: '0711146198',
+    active: true,
+    isMain: false,
+  }
+];
+
+export const DEFAULT_SERVICES: ServiceItem[] = [
+  { name: 'PASSPORT', price: 25, material: 2, deductStock: true, stockItem: 'PHOTO/PASSPORT PAPER', stockQty: 0.25, category: 'Photography', deductSource: 'stock', deductFrom: 'PHOTO/PASSPORT PAPER', deductLocation: 'Photo Studio Counter' },
+  { name: 'LAMINATION', price: 50, material: 10, deductStock: true, stockItem: 'LAMINATING POUCH - A4', stockQty: 1, category: 'Printing & Finishing', deductSource: 'stock', deductFrom: 'LAMINATING POUCH - A4', deductLocation: 'Laminating & Finishing Desk' },
+  { name: 'ID LAMINATION', price: 50, material: 10, deductStock: true, stockItem: 'LAMINATING POUCH - ID', stockQty: 1, category: 'Printing & Finishing', deductSource: 'stock', deductFrom: 'LAMINATING POUCH - ID', deductLocation: 'Laminating & Finishing Desk' },
+  { name: 'PHOTO PRINTING', price: 20, material: 10, deductStock: true, stockItem: 'PHOTO/PASSPORT PAPER', stockQty: 1, category: 'Photography', deductSource: 'stock', deductFrom: 'PHOTO/PASSPORT PAPER', deductLocation: 'Photo Studio Counter' },
+  { name: 'CV/RESUME', price: 50, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Document Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'K.R.A WITH EMAIL', price: 150, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'K.R.A WITHOUT EMAIL', price: 200, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'EMAIL OPENING', price: 50, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Online Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'K.R.A RETURNS', price: 200, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'SHA', price: 150, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'NSSF', price: 150, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'GOOD CONDUCT APPLICATION', price: 150, material: 6, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'TIMS ACCOUNT', price: 300, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'DRIVING LICENSE RENEWAL', price: 200, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'APPLYING HELB', price: 300, material: 0, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Education Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'JOB APPLICATION', price: 100, material: 0, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Online Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'BIRTH CERTIFICATE', price: 200, material: 3, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'NEW Curriculum', price: 30, material: 0, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Education Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'INTERNET PER MIN', price: 1, material: 0, deductStock: false, category: 'Cyber Services', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Cyber Cafe Terminals' },
+  { name: 'WIFI CONNECTION', price: 20, material: 0, deductStock: false, category: 'Cyber Services', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Cyber Hotspot' },
+  { name: 'POSTERS', price: 25, material: 10, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Printing & Finishing', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'SCANING DOCUMENT', price: 20, material: 0, deductStock: false, category: 'Scanning', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Scanner Desk' },
+  { name: 'TYPING PER PAGE', price: 30, material: 0, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Document Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'DOCUMENT EDITING', price: 50, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Document Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'MPESA STATEMENT PER PAGE', price: 10, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Printing & Finishing', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'PRINTING', price: 10, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Printing & Finishing', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'PRINTING FROM EMAIL', price: 30, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Printing & Finishing', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'COMPUTER EDITING DOC', price: 50, material: 1, deductStock: true, stockItem: 'SERVICE MATERIAL', stockQty: 1, category: 'Document Services', deductSource: 'stock', deductFrom: 'SERVICE MATERIAL', deductLocation: 'Main Cyber Counter' },
+  { name: 'PAST PAPERS', price: 10, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Education Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'MUSIC LOADING', price: 5, material: 0, deductStock: false, category: 'Media & Phone', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Phone Hub Counter' },
+  { name: 'VIDEO LOADING', price: 10, material: 0, deductStock: false, category: 'Media & Phone', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Phone Hub Counter' },
+  { name: 'MIX LOADING', price: 10, material: 0, deductStock: false, category: 'Media & Phone', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Phone Hub Counter' },
+  { name: 'PHONE APPS', price: 50, material: 0, deductStock: false, category: 'Media & Phone', deductSource: 'labor', deductFrom: 'Labor Only (Digital Service)', deductLocation: 'Phone Hub Counter' },
+  { name: 'UNLOCK', price: 300, material: 0, deductStock: false, category: 'Technical Repairs', deductSource: 'labor', deductFrom: 'Labor Only (Technical Service)', deductLocation: 'Hardware Workshop' },
+  { name: 'BYPASS', price: 500, material: 0, deductStock: false, category: 'Technical Repairs', deductSource: 'labor', deductFrom: 'Labor Only (Technical Service)', deductLocation: 'Hardware Workshop' },
+  { name: 'PATTERN', price: 300, material: 0, deductStock: false, category: 'Technical Repairs', deductSource: 'labor', deductFrom: 'Labor Only (Technical Service)', deductLocation: 'Hardware Workshop' },
+  { name: 'PHONE SOFTWARE SERVICING', price: 100, material: 0, deductStock: false, category: 'Technical Repairs', deductSource: 'labor', deductFrom: 'Labor Only (Technical Service)', deductLocation: 'Hardware Workshop' },
+  { name: 'FIRMWARE INSTALLATION', price: 500, material: 0, deductStock: false, category: 'Technical Repairs', deductSource: 'labor', deductFrom: 'Labor Only (Technical Service)', deductLocation: 'Hardware Workshop' },
+  { name: 'FLASHING', price: 500, material: 0, deductStock: false, category: 'Technical Repairs', deductSource: 'labor', deductFrom: 'Labor Only (Technical Service)', deductLocation: 'Hardware Workshop' },
+  { name: 'ID PHOTOCOPY', price: 10, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Photocopy', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'PHOTOCOPY B & W', price: 5, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Photocopy', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'PHOTOCOPY COLORED', price: 10, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Photocopy', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'GOOD CONDUCT PRINTING', price: 50, material: 1, deductStock: true, stockItem: 'PHOTOCOPY PAPER', stockQty: 1, category: 'Government & E-Services', deductSource: 'stock', deductFrom: 'PHOTOCOPY PAPER', deductLocation: 'Main Cyber Counter' },
+  { name: 'A 4 ENVELOPE', price: 10, material: 4, deductStock: true, stockItem: 'ENVELOPE A4', stockQty: 1, category: 'Stationery', deductSource: 'stock', deductFrom: 'ENVELOPE A4', deductLocation: 'Stationery Display Shelf' },
+  { name: 'A 5 ENVELOPE', price: 10, material: 3, deductStock: true, stockItem: 'ENVELOPE A5', stockQty: 1, category: 'Stationery', deductSource: 'stock', deductFrom: 'ENVELOPE A5', deductLocation: 'Stationery Display Shelf' },
+];
+
+export const DEFAULT_STOCK: StockItem[] = [
+  { name: 'PHOTOCOPY PAPER', category: 'Paper & Printing', unit: 'pieces', openingStock: 500, stockAdded: 0, costPrice: 1.0, sellingPrice: 5.0, reorderLevel: 50, supplier: 'Paper Converters Kenya' },
+  { name: 'PHOTO/PASSPORT PAPER', category: 'Photo Media', unit: 'pieces', openingStock: 120, stockAdded: 0, costPrice: 8.0, sellingPrice: 20.0, reorderLevel: 20, supplier: 'Canon Direct Hub' },
+  { name: 'LAMINATING POUCH - ID', category: 'Lamination', unit: 'pieces', openingStock: 80, stockAdded: 0, costPrice: 10.0, sellingPrice: 50.0, reorderLevel: 15, supplier: 'Office Mart Nairobi' },
+  { name: 'LAMINATING POUCH - A4', category: 'Lamination', unit: 'pieces', openingStock: 45, stockAdded: 0, costPrice: 10.0, sellingPrice: 50.0, reorderLevel: 10, supplier: 'Office Mart Nairobi' },
+  { name: 'ENVELOPE A4', category: 'Stationery', unit: 'pieces', openingStock: 75, stockAdded: 0, costPrice: 4.0, sellingPrice: 10.0, reorderLevel: 15, supplier: 'Nairobi Packaging' },
+  { name: 'ENVELOPE A5', category: 'Stationery', unit: 'pieces', openingStock: 60, stockAdded: 0, costPrice: 3.0, sellingPrice: 10.0, reorderLevel: 15, supplier: 'Nairobi Packaging' },
+  { name: 'A 4 CARD PRINTING PAPER', category: 'Paper & Printing', unit: 'pieces', openingStock: 35, stockAdded: 0, costPrice: 7.0, sellingPrice: 25.0, reorderLevel: 10, supplier: 'Paper Converters Kenya' },
+  { name: 'SERVICE MATERIAL', category: 'General', unit: 'pieces', openingStock: 50, stockAdded: 0, costPrice: 2.0, sellingPrice: 10.0, reorderLevel: 10, supplier: 'Sellora Central Store' },
+];
+
+export const DEFAULT_STAFF: UserAccount[] = [
+  {
+    id: 'STAFF_001',
+    name: 'Hesborn Nyakundi (Owner)',
+    username: 'admin',
+    password: 'admin123',
+    role: 'admin',
+    phone: '0711146198',
+    email: 'hesborn.nyakundi495@gmail.com',
+    active: true,
+    createdAt: '2026-01-01T08:00:00.000Z',
+  },
+  {
+    id: 'STAFF_002',
+    name: 'Mercyline Mokua',
+    username: 'cashier',
+    password: 'pass123',
+    role: 'cashier',
+    phone: '0712478642',
+    email: 'mercyline@sellora.co.ke',
+    active: true,
+    createdAt: '2026-01-15T09:00:00.000Z',
+  },
+  {
+    id: 'STAFF_003',
+    name: 'Dennis Cashier',
+    username: 'cashier',
+    password: 'pass123',
+    role: 'cashier',
+    phone: '0722000000',
+    email: 'cashier@sellora.co.ke',
+    active: true,
+    createdAt: '2026-02-01T08:30:00.000Z',
+  }
+];
+
+export const DEFAULT_CUSTOMERS: Customer[] = [
+  { id: 'CUST_1', name: 'Faith Wanjiku', phone: '254712345678', email: 'faith.w@gmail.com', address: 'Reuben Gate 3', totalSpent: 450, debtBalance: 0 },
+  { id: 'CUST_2', name: 'John Otieno', phone: '254723456789', email: 'jotieno@yahoo.com', address: 'Bypass Plaza', totalSpent: 850, debtBalance: 200 },
+  { id: 'CUST_3', name: 'Mercy Achieng', phone: '254734567890', email: 'mercy.ach@gmail.com', address: 'Pipeline Junction', totalSpent: 1200, debtBalance: 0 },
+  { id: 'CUST_4', name: 'Babu Mrefu', phone: '254798765432', email: 'babu.m@outlook.com', address: 'Plot 42 Reuben', totalSpent: 300, debtBalance: 150 },
+];
+
+export const DEFAULT_ELECTRONICS_PRODUCTS: ElectronicsProduct[] = [
+  { id: 'EL_001', name: 'Oraimo 20000mAh Power Bank Toast 10', barcode: '6972049012345', sku: 'OR-PB-20K', brand: 'Oraimo', category: 'Power Banks', buy: 1600, sell: 2300, qty: 8, min: 2, warranty: '12 Months', supplier: 'Oraimo Kenya Ltd' },
+  { id: 'EL_002', name: 'Samsung Fast Charger Type-C 25W', barcode: '8806090123456', sku: 'SAM-TC-25W', brand: 'Samsung', category: 'Chargers', buy: 650, sell: 1200, qty: 15, min: 3, warranty: '6 Months', supplier: 'MobiParts Eastleigh' },
+  { id: 'EL_003', name: 'Sandisk 64GB Ultra Flash Drive USB 3.0', barcode: '6196591234567', sku: 'SAN-64-U', brand: 'SanDisk', category: 'Storage', buy: 700, sell: 1100, qty: 12, min: 3, warranty: '12 Months', supplier: 'Silicon Towers Nairobi' },
+  { id: 'EL_004', name: 'Oraimo SpaceBuds Bluetooth Earphones', barcode: '6972049054321', sku: 'OR-EAR-SB', brand: 'Oraimo', category: 'Audio', buy: 1800, sell: 2600, qty: 6, min: 2, warranty: '12 Months', supplier: 'Oraimo Kenya Ltd' },
+  { id: 'EL_005', name: 'Tecno Spark 20 128GB / 8GB RAM', barcode: '6934123456789', sku: 'TEC-SPK-20', brand: 'Tecno', category: 'Smartphones', buy: 14500, sell: 17200, qty: 3, min: 1, warranty: '13 Months', supplier: 'Carlcare Logistics' },
+];
+
+export const INITIAL_TRANSACTIONS: Transaction[] = [
+  {
+    id: 1788440991936,
+    receipt: 'MJRC-20260903-00081',
+    date: '2026-09-03T16:09:51.000Z',
+    customer: 'Walk-in Customer',
+    service: 'A 4 ENVELOPE × 1',
+    services: [{ service: 'A 4 ENVELOPE', qty: 1, price: 10, material: 4, total: 10, materialTotal: 4, stockUsed: { name: 'ENVELOPE A4', qty: 1 } }],
+    qty: 1,
+    price: 10,
+    subtotal: 10,
+    total: 10,
+    material: 4,
+    materialTotal: 4,
+    paid: 10,
+    change: 0,
+    profit: 6,
+    payment: 'M-Pesa',
+    staff: 'Hesborn Nyakundi',
+    status: 'completed',
+  },
+  {
+    id: 1788383380905,
+    receipt: 'MJRC-20260902-00079',
+    date: '2026-09-03T00:09:40.000Z',
+    customer: 'David Mutua',
+    phone: '0723456789',
+    service: 'DRIVING LICENSE RENEWAL × 1',
+    services: [{ service: 'DRIVING LICENSE RENEWAL', qty: 1, price: 150, material: 3, total: 150, materialTotal: 3, stockUsed: { name: 'PHOTOCOPY PAPER', qty: 1 } }],
+    qty: 1,
+    price: 150,
+    subtotal: 150,
+    total: 150,
+    material: 3,
+    materialTotal: 3,
+    paid: 150,
+    change: 0,
+    profit: 147,
+    payment: 'M-Pesa',
+    staff: 'Hesborn Nyakundi',
+    status: 'completed',
+  },
+  {
+    id: 1788369571494,
+    receipt: 'MJRC-20260902-00078',
+    date: '2026-09-02T20:19:30.000Z',
+    customer: 'Peter Kamau',
+    phone: '0712345678',
+    service: 'PRINTING × 8',
+    services: [{ service: 'PRINTING', qty: 8, price: 10, material: 1, total: 80, materialTotal: 8, stockUsed: { name: 'PHOTOCOPY PAPER', qty: 8 } }],
+    qty: 8,
+    price: 80,
+    subtotal: 80,
+    total: 80,
+    material: 8,
+    materialTotal: 8,
+    paid: 80,
+    change: 0,
+    profit: 72,
+    payment: 'Cash',
+    staff: 'Hesborn Nyakundi',
+    status: 'completed',
+  },
+  {
+    id: 1788367471684,
+    receipt: 'MJRC-20260902-00076',
+    date: '2026-09-02T19:44:31.000Z',
+    customer: 'Alice Njeri',
+    service: 'LAMINATION × 2',
+    services: [{ service: 'LAMINATION', qty: 2, price: 50, material: 10, total: 100, materialTotal: 20, stockUsed: { name: 'LAMINATING POUCH - A4', qty: 2 } }],
+    qty: 2,
+    price: 100,
+    subtotal: 100,
+    total: 100,
+    material: 20,
+    materialTotal: 20,
+    paid: 100,
+    change: 0,
+    profit: 80,
+    payment: 'Cash',
+    staff: 'Dennis Cashier',
+    status: 'completed',
+  },
+  {
+    id: 1788359980813,
+    receipt: 'MJRC-20260902-00075',
+    date: '2026-09-02T17:39:40.000Z',
+    customer: 'Walk-in Customer',
+    service: 'PHOTOCOPY B & W × 1',
+    services: [{ service: 'PHOTOCOPY B & W', qty: 1, price: 5, material: 1, total: 5, materialTotal: 1, stockUsed: { name: 'PHOTOCOPY PAPER', qty: 1 } }],
+    qty: 1,
+    price: 5,
+    subtotal: 5,
+    total: 5,
+    material: 1,
+    materialTotal: 1,
+    paid: 5,
+    change: 0,
+    profit: 4,
+    payment: 'Cash',
+    staff: 'Hesborn Nyakundi',
+    status: 'completed',
+  }
+];
+
+export const INITIAL_GAS_TRANSACTIONS: GasTransaction[] = [
+  {
+    id: 1787680123887,
+    receipt: 'GAS-000021',
+    date: '2026-09-02T20:48:43.000Z',
+    customer: 'Mary Wambui',
+    phone: '0722123456',
+    brand: 'TOTAL GAS',
+    size: '6 KG',
+    qty: 1,
+    price: 950,
+    cost: 780,
+    total: 950,
+    profit: 170,
+    paid: 950,
+    outstanding: 0,
+    payment: 'M-Pesa',
+    staff: 'Hesborn Nyakundi',
+  },
+  {
+    id: 1787597953697,
+    receipt: 'GAS-000020',
+    date: '2026-09-01T21:59:13.000Z',
+    customer: 'Hassan Omar',
+    phone: '0733987654',
+    brand: 'ProGas',
+    size: '6 KG',
+    qty: 1,
+    price: 950,
+    cost: 780,
+    total: 950,
+    profit: 170,
+    paid: 950,
+    outstanding: 0,
+    payment: 'Cash',
+    staff: 'Hesborn Nyakundi',
+  },
+  {
+    id: 1787562625029,
+    receipt: 'GAS-000019',
+    date: '2026-08-31T12:10:25.000Z',
+    customer: 'James Kariuki',
+    phone: '0714555666',
+    brand: 'K-Gas',
+    size: '13 KG',
+    qty: 1,
+    price: 2600,
+    cost: 2150,
+    total: 2600,
+    profit: 450,
+    paid: 2600,
+    outstanding: 0,
+    payment: 'M-Pesa',
+    staff: 'Hesborn Nyakundi',
+  }
+];
+
+export const INITIAL_EXPENSES: Expense[] = [
+  { id: 101, date: '2026-09-01', desc: 'Safaricom Wi-Fi Fibre monthly subscription', amount: 3000, category: 'Internet', payment: 'M-Pesa', staff: 'Hesborn Nyakundi' },
+  { id: 102, date: '2026-09-02', desc: 'Canon G3010 Black ink refill (GI-490)', amount: 950, category: 'Printer Ink', payment: 'Cash', staff: 'Hesborn Nyakundi' },
+  { id: 103, date: '2026-09-03', desc: 'Shop electricity tokens (KPLC prepaid)', amount: 500, category: 'Electricity', payment: 'M-Pesa', staff: 'Hesborn Nyakundi' },
+];
+
+export const DEFAULT_GENERAL_CATEGORIES = [
+  { id: 'cat_food', name: 'Food & Grains', description: 'Sugar, flour, rice, salt, tea' },
+  { id: 'cat_dairy', name: 'Dairy & Bakery', description: 'Milk, bread, biscuits, eggs' },
+  { id: 'cat_bever', name: 'Beverages', description: 'Sodas, bottled water, juice' },
+  { id: 'cat_house', name: 'Household & Cleaning', description: 'Soap, detergent, matches' },
+  { id: 'cat_snacks', name: 'Snacks & Confectionery', description: 'Crisps, sweets, chewing gum' },
+];
+
+export const DEFAULT_GENERAL_SUPPLIERS = [
+  { id: 'sup_1', name: 'ABC Distributors Ltd', phone: '0711223344', email: 'sales@abcdistributors.co.ke', address: 'Industrial Area, Nairobi', amountOwed: 0 },
+  { id: 'sup_2', name: 'Nairobi Wholesale Grocers', phone: '0722334455', email: 'orders@nairobiwholesale.co.ke', address: 'Wakulima Market, Nairobi', amountOwed: 1500 },
+  { id: 'sup_3', name: 'BIDCO Africa', phone: '0733445566', email: 'info@bidcoafrica.com', address: 'Thika Highway', amountOwed: 0 },
+  { id: 'sup_4', name: 'Coca-Cola Beverages Africa', phone: '0744556677', email: 'orders@ccba.co.ke', address: 'Uhai Road, Nairobi', amountOwed: 0 },
+];
+
+export const DEFAULT_GENERAL_PRODUCTS = [
+  { id: 'gp_1', name: 'Sugar 1kg', sku: 'SUG-1KG', barcode: '616110123401', category: 'Food & Grains', buyingPrice: 130, sellingPrice: 150, quantity: 50, unit: 'Kg' as const, minStock: 10, supplier: 'Nairobi Wholesale Grocers', active: true },
+  { id: 'gp_2', name: 'Milk 500ml (Fresh)', sku: 'MLK-500', barcode: '616110123402', category: 'Dairy & Bakery', buyingPrice: 55, sellingPrice: 65, quantity: 40, unit: 'Packet' as const, minStock: 8, supplier: 'ABC Distributors Ltd', active: true },
+  { id: 'gp_3', name: 'White Bread (Large)', sku: 'BRD-LGE', barcode: '616110123403', category: 'Dairy & Bakery', buyingPrice: 60, sellingPrice: 70, quantity: 25, unit: 'Piece' as const, minStock: 5, supplier: 'ABC Distributors Ltd', active: true },
+  { id: 'gp_4', name: 'Maize Flour 2kg (Jogoo)', sku: 'FLR-2KG', barcode: '616110123404', category: 'Food & Grains', buyingPrice: 170, sellingPrice: 195, quantity: 30, unit: 'Packet' as const, minStock: 6, supplier: 'Kenya Grain Millers', active: true },
+  { id: 'gp_5', name: 'Rice Pishori 1kg', sku: 'RCE-1KG', barcode: '616110123405', category: 'Food & Grains', buyingPrice: 180, sellingPrice: 220, quantity: 35, unit: 'Kg' as const, minStock: 8, supplier: 'Nairobi Wholesale Grocers', active: true },
+  { id: 'gp_6', name: 'Cooking Oil 1Ltr (Golden Fry)', sku: 'OIL-1L', barcode: '616110123406', category: 'Food & Grains', buyingPrice: 320, sellingPrice: 370, quantity: 20, unit: 'Litre' as const, minStock: 5, supplier: 'BIDCO Africa', active: true },
+  { id: 'gp_7', name: 'Soda 500ml (Coca-Cola)', sku: 'SDA-500', barcode: '616110123407', category: 'Beverages', buyingPrice: 70, sellingPrice: 90, quantity: 48, unit: 'Bottle' as const, minStock: 12, supplier: 'Coca-Cola Beverages Africa', active: true },
+  { id: 'gp_8', name: 'Drinking Water 500ml', sku: 'WTR-500', barcode: '616110123408', category: 'Beverages', buyingPrice: 25, sellingPrice: 40, quantity: 60, unit: 'Bottle' as const, minStock: 15, supplier: 'ABC Distributors Ltd', active: true },
+  { id: 'gp_9', name: 'Bar Soap (Geisha)', sku: 'SOP-GSH', barcode: '616110123409', category: 'Household & Cleaning', buyingPrice: 90, sellingPrice: 110, quantity: 25, unit: 'Piece' as const, minStock: 5, supplier: 'BIDCO Africa', active: true },
+  { id: 'gp_10', name: 'Omo Detergent 500g', sku: 'DET-OMO', barcode: '616110123410', category: 'Household & Cleaning', buyingPrice: 140, sellingPrice: 170, quantity: 18, unit: 'Packet' as const, minStock: 4, supplier: 'ABC Distributors Ltd', active: true },
+  { id: 'gp_11', name: 'Fresh Eggs (Tray of 30)', sku: 'EGG-30', barcode: '616110123411', category: 'Dairy & Bakery', buyingPrice: 380, sellingPrice: 450, quantity: 10, unit: 'Box' as const, minStock: 3, supplier: 'Nairobi Wholesale Grocers', active: true },
+  { id: 'gp_12', name: 'Safety Matches (Matchbox)', sku: 'MTC-BOX', barcode: '616110123412', category: 'Household & Cleaning', buyingPrice: 5, sellingPrice: 10, quantity: 100, unit: 'Piece' as const, minStock: 20, supplier: 'ABC Distributors Ltd', active: true },
+];
+
+export const DEFAULT_CYBER_CATEGORIES = [
+  { id: 'cat_c1', name: 'Printing & Photocopy' },
+  { id: 'cat_c2', name: 'Stationery & Binding' },
+  { id: 'cat_c3', name: 'Government Services' },
+  { id: 'cat_c4', name: 'Digital Accessories' },
+];
+
+export const DEFAULT_CYBER_SUPPLIERS = [
+  { id: 'sup_c1', name: 'Stationery World CBD', phone: '0711000111', email: 'sales@stationeryworld.co.ke' },
+  { id: 'sup_c2', name: 'Alpha Paper Distributors', phone: '0722333444', email: 'orders@alphapaper.co.ke' },
+];
+
+export const DEFAULT_CYBER_PRODUCTS = [
+  { id: 'cyb_1', name: 'Photocopy Paper A4 (Ream)', sku: 'CYB-PAP-A4', barcode: '6161200001', category: 'Printing & Photocopy', buyingPrice: 650, sellingPrice: 850, quantity: 15, unit: 'Box' as const, minStock: 3, supplier: 'Alpha Paper Distributors', active: true },
+  { id: 'cyb_2', name: 'Laminating Pouch A4 (Pk 100)', sku: 'CYB-LAM-A4', barcode: '6161200002', category: 'Stationery & Binding', buyingPrice: 450, sellingPrice: 600, quantity: 8, unit: 'Packet' as const, minStock: 2, supplier: 'Stationery World CBD', active: true },
+  { id: 'cyb_3', name: 'Spiral Binding Coil (Box 100)', sku: 'CYB-SPR-10', barcode: '6161200003', category: 'Stationery & Binding', buyingPrice: 300, sellingPrice: 450, quantity: 10, unit: 'Box' as const, minStock: 2, supplier: 'Stationery World CBD', active: true },
+  { id: 'cyb_4', name: 'Flash Disk 32GB (SanDisk)', sku: 'CYB-FLS-32', barcode: '6161200004', category: 'Digital Accessories', buyingPrice: 600, sellingPrice: 900, quantity: 12, unit: 'Piece' as const, minStock: 3, supplier: 'Stationery World CBD', active: true },
+];
+
+export const DEFAULT_GAS_CATEGORIES = [
+  { id: 'cat_g1', name: 'LPG Gas Cylinders' },
+  { id: 'cat_g2', name: 'Petroleum / Fuel' },
+  { id: 'cat_g3', name: 'Lubricants & Oils' },
+  { id: 'cat_g4', name: 'Burners & Accessories' },
+];
+
+export const DEFAULT_GAS_SUPPLIERS = [
+  { id: 'sup_g1', name: 'TotalEnergies Kenya', phone: '0700111222', email: 'orders@totalenergies.co.ke' },
+  { id: 'sup_g2', name: 'Taifa Gas Depot', phone: '0733444555', email: 'sales@taifagas.co.ke' },
+];
+
+export const DEFAULT_GAS_PRODUCTS = [
+  { id: 'gas_1', name: 'LPG Gas Refill 6kg (Total/Taifa)', sku: 'GAS-REF-6KG', barcode: '6161300001', category: 'LPG Gas Cylinders', buyingPrice: 950, sellingPrice: 1150, quantity: 20, unit: 'Piece' as const, minStock: 5, supplier: 'Taifa Gas Depot', active: true },
+  { id: 'gas_2', name: 'LPG Gas Refill 13kg (Total/Taifa)', sku: 'GAS-REF-13KG', barcode: '6161300002', category: 'LPG Gas Cylinders', buyingPrice: 2400, sellingPrice: 2800, quantity: 10, unit: 'Piece' as const, minStock: 3, supplier: 'TotalEnergies Kenya', active: true },
+  { id: 'gas_3', name: 'Super Petrol (Litre)', sku: 'GAS-PET-L', barcode: '6161300003', category: 'Petroleum / Fuel', buyingPrice: 175, sellingPrice: 195, quantity: 500, unit: 'Litre' as const, minStock: 100, supplier: 'TotalEnergies Kenya', active: true },
+  { id: 'gas_4', name: '2T Engine Oil 500ml', sku: 'GAS-OIL-2T', barcode: '6161300004', category: 'Lubricants & Oils', buyingPrice: 250, sellingPrice: 350, quantity: 15, unit: 'Bottle' as const, minStock: 4, supplier: 'TotalEnergies Kenya', active: true },
+];
+
+export const DEFAULT_TECH_CATEGORIES = [
+  { id: 'cat_t1', name: 'Smartphones' },
+  { id: 'cat_t2', name: 'Chargers & Cables' },
+  { id: 'cat_t3', name: 'Power Banks' },
+  { id: 'cat_t4', name: 'Audio & Earphones' },
+  { id: 'cat_t5', name: 'Storage' },
+];
+
+export const DEFAULT_TECH_SUPPLIERS = [
+  { id: 'sup_t1', name: 'Oraimo Kenya Ltd', phone: '0700222333', email: 'sales@oraimo.com' },
+  { id: 'sup_t2', name: 'MobiParts Eastleigh', phone: '0711444555', email: 'mobiparts@gmail.com' },
+];
+
+export const DEFAULT_TECH_PRODUCTS = DEFAULT_ELECTRONICS_PRODUCTS.map((el, i) => ({
+  id: `tech_${i + 1}`,
+  name: el.name,
+  sku: el.sku || `SKU-${i}`,
+  barcode: el.barcode || `616140000${i}`,
+  category: el.category || 'Smartphones',
+  buyingPrice: el.buy,
+  sellingPrice: el.sell,
+  quantity: el.qty,
+  unit: 'Piece' as const,
+  minStock: el.min,
+  supplier: el.supplier || 'Oraimo Kenya Ltd',
+  active: true,
+}));
+
+export const INITIAL_GENERAL_SALES = [
+  {
+    id: 1787560000001,
+    receipt: 'GS-000001',
+    date: '2026-09-04T10:30:00.000Z',
+    customer: 'Mary Akinyi',
+    phone: '0712333444',
+    items: [
+      { productId: 'gp_1', productName: 'Sugar 1kg', qty: 2, unitPrice: 150, buyingPrice: 130, total: 300, profit: 40 },
+      { productId: 'gp_2', productName: 'Milk 500ml (Fresh)', qty: 2, unitPrice: 65, buyingPrice: 55, total: 130, profit: 20 },
+    ],
+    subtotal: 430,
+    discount: 0,
+    total: 430,
+    paid: 500,
+    change: 70,
+    profit: 60,
+    payment: 'M-Pesa' as const,
+    staff: 'Hesborn Nyakundi',
+  },
+  {
+    id: 1787560000002,
+    receipt: 'GS-000002',
+    date: '2026-09-04T14:15:00.000Z',
+    customer: 'Peter Kamau',
+    phone: '0722111222',
+    items: [
+      { productId: 'gp_4', productName: 'Maize Flour 2kg (Jogoo)', qty: 1, unitPrice: 195, buyingPrice: 170, total: 195, profit: 25 },
+      { productId: 'gp_6', productName: 'Cooking Oil 1Ltr (Golden Fry)', qty: 1, unitPrice: 370, buyingPrice: 320, total: 370, profit: 50 },
+    ],
+    subtotal: 565,
+    discount: 15,
+    total: 550,
+    paid: 550,
+    change: 0,
+    profit: 75,
+    payment: 'Cash' as const,
+    staff: 'Hesborn Nyakundi',
+  }
+];
