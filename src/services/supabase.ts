@@ -7,9 +7,15 @@ import {
   Customer
 } from '../types/pos';
 
-// Read client credentials lazily from environment
+// Read client credentials lazily from environment.
+// Supabase's dashboard now calls this the "publishable" key, but older
+// projects/docs call it the "anon" key - they're the same kind of key,
+// so accept either env var name.
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseAnonKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  '';
 
 let supabaseInstance: SupabaseClient | null = null;
 
