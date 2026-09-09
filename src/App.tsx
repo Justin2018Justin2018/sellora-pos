@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { POSProvider, usePOS } from './context/POSContext';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
@@ -376,6 +377,7 @@ export default function App() {
   return (
     <POSProvider>
       <MainApp />
+      <SpeedInsights />
     </POSProvider>
   );
 }
