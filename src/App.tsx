@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { SpeedInsights } from '@vercel/speed-insights/react';
 import { POSProvider, usePOS } from './context/POSContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthGate } from './components/auth/AuthGate';
+import { SyncStatusWidget } from './components/common/SyncStatusWidget';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { TabKey } from './components/layout/Navigation';
@@ -45,7 +47,7 @@ import { GeneralSuppliersView } from './components/general/GeneralSuppliersView'
 import { GeneralProfitView } from './components/general/GeneralProfitView';
 
 import { Transaction } from './types/pos';
-import { Sparkles, ShieldCheck, Database } from 'lucide-react';
+import { Sparkles, ShieldCheck, Database, LogOut } from 'lucide-react';
 
 const TAB_TITLES: Record<TabKey, string> = {
   dashboard: 'Business Overview',
@@ -83,6 +85,7 @@ const MainApp: React.FC = () => {
     setIsSuperAdmin,
     refreshSubscriptionStatus,
   } = usePOS();
+  const { configured: authConfigured, userEmail, dbTenant, signOut } = useAuth();
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [selectedReceipt, setSelectedReceipt] = useState<Transaction | null>(null);
@@ -104,11 +107,16 @@ const MainApp: React.FC = () => {
     }
   }, []);
 
-  // Compute tenant subscription state
-  const { status: calculatedStatus } = computeSubscriptionStatus(currentTenant);
+  // Compute tenant subscription state. Prefer the record pulled straight
+  // from Supabase (dbTenant) - it can't be edited from devtools the way
+  // the local currentTenant copy can. Falls back to the local copy for
+  // shops that don't have a database row yet (e.g. local-only demo
+  // tenants), so existing behavior is preserved until they're migrated.
+  const authoritativeTenant = dbTenant || currentTenant;
+  const { status: calculatedStatus } = computeSubscriptionStatus(authoritativeTenant);
   const effectiveStatus =
-    currentTenant.status === 'SUSPENDED' || currentTenant.status === 'TERMINATED'
-      ? currentTenant.status
+    authoritativeTenant.status === 'SUSPENDED' || authoritativeTenant.status === 'TERMINATED'
+      ? authoritativeTenant.status
       : calculatedStatus;
 
   const isBlocked =
@@ -137,7 +145,7 @@ const MainApp: React.FC = () => {
     return (
       <>
         <SubscriptionBlockedScreen
-          tenant={currentTenant}
+          tenant={authoritativeTenant}
           onSuperAdminAuthenticated={() => {
             setIsSuperAdmin(true);
             setIsSuperAdminOpen(true);
@@ -199,7 +207,7 @@ const MainApp: React.FC = () => {
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
           {/* Subscription Expiry Alert Banner */}
           <SubscriptionExpiryBanner
-            tenant={currentTenant}
+            tenant={authoritativeTenant}
             onRenewClick={() => setIsSuperAdminOpen(true)}
           />
 
@@ -221,7 +229,7 @@ const MainApp: React.FC = () => {
             ) : businessMode === 'gas' ? (
               <GasView />
             ) : businessMode === 'electronics' ? (
-              <ElectronicsView />
+              <ElectronicsView onSaleCompleted={(tx) => setSelectedReceipt(tx)} />
             ) : (
               <GeneralDashboardView onNavigateTab={setActiveTab} />
             )
@@ -239,7 +247,7 @@ const MainApp: React.FC = () => {
           )}
 
           {activeTab === 'gas' && <GasView />}
-          {activeTab === 'electronics' && <ElectronicsView />}
+          {activeTab === 'electronics' && <ElectronicsView onSaleCompleted={(tx) => setSelectedReceipt(tx)} />}
 
           {activeTab === 'general_products' && <GeneralProductsView />}
 
@@ -283,9 +291,9 @@ const MainApp: React.FC = () => {
         <footer className="h-12 shrink-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 sm:px-6 lg:px-8 text-[11px] text-slate-400 font-medium z-10">
           <div className="flex items-center gap-2 truncate">
             <span className="truncate">
-              {profile.name || currentTenant.shopName || 'Sellora POS'} — Commercial License:{' '}
+              {profile.name || authoritativeTenant.shopName || 'Sellora POS'} — Commercial License:{' '}
               <span className="text-blue-600 dark:text-blue-400 font-semibold">
-                Active ({currentTenant.plan || profile.plan || 'PRO'})
+                Active ({authoritativeTenant.plan || profile.plan || 'PRO'})
               </span>
             </span>
           </div>
@@ -329,6 +337,24 @@ const MainApp: React.FC = () => {
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span>Setup Wizard</span>
             </button>
+            {authConfigured && userEmail && (
+              <>
+                <span className="text-slate-300 dark:text-slate-700">|</span>
+                <button
+                  onClick={() => {
+                    if (window.confirm('Sign out of this shop account?')) {
+                      signOut();
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 hover:text-red-600 dark:hover:text-red-400 font-medium transition-colors"
+                  title={`Signed in as ${userEmail}`}
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">{userEmail}</span>
+                  <span className="md:hidden">Sign out</span>
+                </button>
+              </>
+            )}
             <span className="text-slate-300 dark:text-slate-700">|</span>
             <span className="font-mono text-[10px] text-slate-500">{currentShop.name}</span>
           </div>
@@ -369,15 +395,21 @@ const MainApp: React.FC = () => {
 
       {/* Toast Notification Container */}
       <ToastContainer />
+
+      {/* Offline/Sync Status - see services/offlineDb.ts, connectivity.ts, syncEngine.ts */}
+      <SyncStatusWidget />
     </div>
   );
 };
 
 export default function App() {
   return (
-    <POSProvider>
-      <MainApp />
-      <SpeedInsights />
-    </POSProvider>
+    <AuthProvider>
+      <AuthGate>
+        <POSProvider>
+          <MainApp />
+        </POSProvider>
+      </AuthGate>
+    </AuthProvider>
   );
 }

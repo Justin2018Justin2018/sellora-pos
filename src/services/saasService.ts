@@ -5,6 +5,16 @@ import {
   SubscriptionPlanConfig,
   SubscriptionAuditEntry,
 } from '../types/pos';
+import { isSupabaseConfigured } from './supabase';
+import {
+  isCurrentUserSuperAdminInDb,
+  pullTenantsFromDb,
+  pushTenantToDb,
+  deleteTenantFromDb,
+  pushAuditEntryToDb,
+  getMyAdminPinHash,
+  setMyAdminPin,
+} from './tenantService';
 
 // Storage keys
 const SAAS_TENANTS_KEY = 'mj_saas_tenants';
@@ -212,6 +222,50 @@ export const getTenants = (): TenantAccount[] => {
 
 export const saveTenants = (tenants: TenantAccount[]): void => {
   localStorage.setItem(SAAS_TENANTS_KEY, JSON.stringify(tenants));
+
+  // Best-effort cloud sync so tenant/subscription data survives across
+  // devices and browsers, not just this one localStorage - fire and
+  // forget, never blocks the UI. Silently no-ops if Supabase isn't
+  // configured or this user isn't a real DB super admin; RLS enforces
+  // that server-side regardless of what this client-side check decides.
+  if (isSupabaseConfigured()) {
+    isCurrentUserSuperAdminInDb().then((isAdmin) => {
+      if (!isAdmin) return;
+      tenants.forEach((t) => {
+        pushTenantToDb(t);
+      });
+    });
+  }
+};
+
+/**
+ * Pulls the authoritative tenant list from Supabase (only returns data if
+ * the signed-in user is a real DB super admin) and merges it into local
+ * storage before the Super Admin dashboard's own state initializes off
+ * getTenants(). Any purely-local tenant not yet in the cloud is kept and
+ * pushed up, so nothing is lost. Call this once per session, before the
+ * Super Admin dashboard can be opened - see AuthContext.resolveSession.
+ */
+export const syncTenantsFromCloudIfAuthorized = async (): Promise<void> => {
+  if (!isSupabaseConfigured()) return;
+  const isAdmin = await isCurrentUserSuperAdminInDb();
+  if (!isAdmin) return;
+
+  const remote = await pullTenantsFromDb();
+  if (!remote) return;
+
+  const local = safeStorageGet<TenantAccount[]>(SAAS_TENANTS_KEY, []);
+  const remoteIds = new Set(remote.map((t) => t.id));
+  const localOnly = local.filter((t) => !remoteIds.has(t.id));
+  const merged = [...remote, ...localOnly];
+
+  // Direct localStorage write (not saveTenants) to avoid re-triggering a
+  // redundant push of rows we just pulled; localOnly rows below still
+  // get pushed up via the follow-up saveTenants-less push loop.
+  localStorage.setItem(SAAS_TENANTS_KEY, JSON.stringify(merged));
+  localOnly.forEach((t) => {
+    pushTenantToDb(t);
+  });
 };
 
 export const getTenantById = (id: string): TenantAccount | undefined => {
@@ -489,6 +543,11 @@ export const deleteTenant = (id: string): boolean => {
 
   const filtered = tenants.filter((t) => t.id !== id);
   saveTenants(filtered);
+  if (isSupabaseConfigured()) {
+    isCurrentUserSuperAdminInDb().then((isAdmin) => {
+      if (isAdmin) deleteTenantFromDb(id);
+    });
+  }
 
   logSubscriptionAudit({
     action: 'ACCOUNT_DELETED',
@@ -498,6 +557,86 @@ export const deleteTenant = (id: string): boolean => {
   });
 
   return true;
+};
+
+/**
+ * Ensures a local TenantAccount record exists for a shop that a user has
+ * just authenticated into via real Supabase Auth (see AuthContext /
+ * AuthGate). The rest of the app (POSContext, all views) reads/writes
+ * tenant-scoped data via getTenantKeyStatic(currentTenantId, ...), so
+ * rather than migrating that whole storage model in one risky pass, this
+ * bridges the real authenticated shop_id into that existing system: if a
+ * matching tenant record already exists it's reused as-is (so existing
+ * shop data isn't touched); if not, a new one is created on a 14-day
+ * trial. Either way it also sets this shop as the active tenant.
+ */
+export const ensureTenantForShop = (
+  shopId: string,
+  meta: { shopName?: string; ownerEmail?: string; ownerName?: string },
+  dbTenant?: TenantAccount | null
+): TenantAccount => {
+  const tenants = getTenants();
+  const existing = tenants.find((t) => t.id === shopId);
+
+  if (existing) {
+    setCurrentTenantId(shopId);
+    // If we have the authoritative DB record, keep the local copy of
+    // business-defining fields (type, plan, status, dates) in sync with
+    // it - these are admin-controlled and shouldn't drift from what was
+    // actually provisioned, e.g. via the Super Admin "create business"
+    // flow on a different device than the one currently in use.
+    if (dbTenant) {
+      const synced: TenantAccount = {
+        ...existing,
+        shopName: dbTenant.shopName || existing.shopName,
+        businessType: dbTenant.businessType || existing.businessType,
+        plan: dbTenant.plan || existing.plan,
+        status: dbTenant.status || existing.status,
+        startDate: dbTenant.startDate || existing.startDate,
+        expiryDate: dbTenant.expiryDate || existing.expiryDate,
+      };
+      if (JSON.stringify(synced) !== JSON.stringify(existing)) {
+        saveTenants(tenants.map((t) => (t.id === shopId ? synced : t)));
+      }
+      return synced;
+    }
+    return existing;
+  }
+
+  // No local record yet. If we already have the authoritative DB record
+  // (the normal case for any shop provisioned via claim_shop or the
+  // Super Admin create-business flow), bridge it in directly instead of
+  // guessing with generic trial defaults.
+  if (dbTenant) {
+    saveTenants([...tenants, dbTenant]);
+    setCurrentTenantId(shopId);
+    return dbTenant;
+  }
+
+  const today = new Date();
+  const trialEnd = new Date();
+  trialEnd.setDate(today.getDate() + 14);
+
+  const newTenant: TenantAccount = {
+    id: shopId,
+    shopName: meta.shopName || shopId,
+    ownerName: meta.ownerName || '',
+    phone: '',
+    email: meta.ownerEmail || '',
+    username: meta.ownerEmail || shopId,
+    status: 'ACTIVE',
+    plan: 'BASIC',
+    startDate: today.toISOString().slice(0, 10),
+    expiryDate: trialEnd.toISOString().slice(0, 10),
+    createdAt: today.toISOString(),
+    lastLogin: today.toISOString(),
+    notes: 'Created from a real Supabase account sign-up (14-day trial).',
+    isPrimaryTenant: false,
+  };
+
+  saveTenants([...tenants, newTenant]);
+  setCurrentTenantId(shopId);
+  return newTenant;
 };
 
 // -------------------------------------------------------------
@@ -549,6 +688,117 @@ export const getSuperAdminSession = (): SuperAdminSession | null => {
 const sha256Hex = async (text: string): Promise<string> => {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+};
+
+/**
+ * ------------------------------------------------------------------
+ * Real (database-backed) Super Admin PIN login
+ * ------------------------------------------------------------------
+ * The env-var-based loginSuperAdmin() below still works if you want
+ * it, but it depends on getting VITE_SUPERADMIN_EMAIL /
+ * VITE_SUPERADMIN_PASSWORD_HASH set correctly at BUILD time on your
+ * hosting provider, which is easy to get wrong. This is the
+ * recommended path instead: it only ever works for an account that's
+ * already a real row in the `super_admins` table (see
+ * isCurrentUserSuperAdminInDb / the Supabase migration that seeds the
+ * first admin) - so it can never grant admin access to someone who
+ * doesn't already have it, but it lets that person set up (and later
+ * change) their own PIN from right inside the app, no redeploy needed.
+ */
+export interface SuperAdminPinResult {
+  success: boolean;
+  message: string;
+  /** True if this call just created a brand-new PIN (first-time setup). */
+  bootstrapped?: boolean;
+  /** True if this account isn't a registered platform admin at all. */
+  notAnAdmin?: boolean;
+}
+
+/** Call this on mount of the login screen to decide which form to show. */
+export const checkSuperAdminAccess = async (): Promise<{ isAdmin: boolean; hasPinSet: boolean }> => {
+  const isAdmin = await isCurrentUserSuperAdminInDb();
+  if (!isAdmin) return { isAdmin: false, hasPinSet: false };
+  const hash = await getMyAdminPinHash();
+  return { isAdmin: true, hasPinSet: hash !== null && hash !== undefined };
+};
+
+export const loginOrSetupSuperAdminPin = async (
+  pin: string,
+  confirmPin?: string
+): Promise<SuperAdminPinResult> => {
+  const isAdmin = await isCurrentUserSuperAdminInDb();
+  if (!isAdmin) {
+    return {
+      success: false,
+      notAnAdmin: true,
+      message: 'This account is not registered as a Sellora platform super admin.',
+    };
+  }
+
+  const existingHash = await getMyAdminPinHash();
+  const enteredHash = await sha256Hex(pin.trim());
+
+  if (existingHash === null || existingHash === undefined) {
+    // First time this admin has logged in - set up their PIN now.
+    if (pin.trim().length < 6) {
+      return { success: false, message: 'Choose a PIN of at least 6 characters.' };
+    }
+    if (pin.trim() !== (confirmPin || '').trim()) {
+      return { success: false, message: 'PINs do not match.' };
+    }
+    const ok = await setMyAdminPin(enteredHash);
+    if (!ok) {
+      return { success: false, message: 'Could not set up your PIN. Please try again.' };
+    }
+    createSuperAdminLocalSession();
+    logSubscriptionAudit({
+      action: 'ADMIN_LOGIN',
+      shopId: 'PLATFORM',
+      shopName: 'Super Admin Console',
+      details: 'Super Admin PIN created and signed in for the first time.',
+    });
+    return { success: true, bootstrapped: true, message: 'Your Super Admin PIN has been set.' };
+  }
+
+  if (enteredHash !== existingHash) {
+    return { success: false, message: 'Incorrect PIN.' };
+  }
+
+  createSuperAdminLocalSession();
+  logSubscriptionAudit({
+    action: 'ADMIN_LOGIN',
+    shopId: 'PLATFORM',
+    shopName: 'Super Admin Console',
+    details: 'Super Admin logged into SaaS Management Dashboard.',
+  });
+  return { success: true, message: 'Signed in.' };
+};
+
+/** Change your PIN once already logged in. */
+export const changeSuperAdminPin = async (newPin: string, confirmPin: string): Promise<SuperAdminPinResult> => {
+  if (newPin.trim().length < 6) {
+    return { success: false, message: 'Choose a PIN of at least 6 characters.' };
+  }
+  if (newPin.trim() !== confirmPin.trim()) {
+    return { success: false, message: 'PINs do not match.' };
+  }
+  const isAdmin = await isCurrentUserSuperAdminInDb();
+  if (!isAdmin) {
+    return { success: false, notAnAdmin: true, message: 'This account is not a registered platform admin.' };
+  }
+  const hash = await sha256Hex(newPin.trim());
+  const ok = await setMyAdminPin(hash);
+  return ok ? { success: true, message: 'PIN updated.' } : { success: false, message: 'Could not update PIN.' };
+};
+
+const createSuperAdminLocalSession = (): void => {
+  const session: SuperAdminSession = {
+    username: 'superadmin',
+    name: 'Platform Owner',
+    email: '',
+    authenticatedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(SAAS_SUPERADMIN_SESSION_KEY, JSON.stringify(session));
 };
 
 export const loginSuperAdmin = async (password: string, username = 'superadmin'): Promise<boolean> => {
@@ -640,6 +890,12 @@ export const logSubscriptionAudit = (entry: {
   };
   const updated = [newEntry, ...currentLog.slice(0, 1000)];
   localStorage.setItem(SAAS_AUDIT_KEY, JSON.stringify(updated));
+
+  if (isSupabaseConfigured()) {
+    isCurrentUserSuperAdminInDb().then((isAdmin) => {
+      if (isAdmin) pushAuditEntryToDb(newEntry);
+    });
+  }
 };
 
 // -------------------------------------------------------------

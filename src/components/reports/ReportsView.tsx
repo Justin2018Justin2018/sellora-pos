@@ -350,6 +350,59 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     window.print();
   };
 
+  /**
+   * Exports exactly what's currently shown in the ledger table (respects
+   * the active period/type/search filters) as a CSV file the person can
+   * open in Excel, Google Sheets, or send to an accountant.
+   */
+  const handleExportCsv = () => {
+    if (filteredLedger.length === 0) {
+      addToast({ type: 'error', title: 'Nothing to export', message: 'No records match the current filter.' });
+      return;
+    }
+
+    const headers = ['Date', 'Receipt', 'Category', 'Description', 'Customer/Party', 'Payment Method', 'Amount (KES)', 'Cost (KES)', 'Net Impact (KES)'];
+
+    const escapeCsvField = (value: string): string => {
+      const str = String(value ?? '');
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const rows = filteredLedger.map((item) => [
+      item.date,
+      item.receipt,
+      item.category,
+      item.desc,
+      item.party,
+      item.payment,
+      item.grossAmount.toFixed(2),
+      item.cogsAmount.toFixed(2),
+      item.netImpact.toFixed(2),
+    ]);
+
+    const csvContent = [headers, ...rows].map((row) => row.map(escapeCsvField).join(',')).join('\r\n');
+    // Leading BOM so Excel opens UTF-8 (KES amounts, names) correctly rather than mangling it.
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `sellora-report-${period}-${dateStamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    addToast({
+      type: 'success',
+      title: 'Export complete',
+      message: `Exported ${filteredLedger.length} record${filteredLedger.length === 1 ? '' : 's'} to CSV.`,
+    });
+  };
+
   const scrollToLedger = (filterType: 'all' | 'cyber' | 'gas' | 'electronics' | 'expense' | 'family') => {
     setLedgerFilter(filterType);
     if (ledgerTableRef.current) {
@@ -465,6 +518,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
               title="Open Thermal Z-Report preview in new tab"
             >
               <span>Z-Slip Tab</span>
+            </button>
+
+            <button
+              onClick={handleExportCsv}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all shadow-sm"
+              title="Export the current ledger view as a CSV file"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Export CSV</span>
             </button>
 
             <button

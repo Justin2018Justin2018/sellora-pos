@@ -294,6 +294,12 @@ export function generateReceiptHtml({
       <span>TOTAL:</span>
       <span>${formatMoney(transaction.total)}</span>
     </div>
+    ${(transaction.discount || 0) > 0 ? `
+    <div class="row" style="font-size: 9px;">
+      <span>Discount:</span>
+      <span>-${formatMoney(transaction.discount)}</span>
+    </div>
+    ` : ''}
     <div class="row">
       <span>Paid (${transaction.payment}):</span>
       <span>${formatMoney(transaction.paid)}</span>
@@ -406,6 +412,12 @@ export function generateReceiptHtml({
       <span>GRAND TOTAL:</span>
       <span>${formatMoney(transaction.total)}</span>
     </div>
+    ${(transaction.discount || 0) > 0 ? `
+    <div class="row" style="font-size: 11px;">
+      <span>Discount:</span>
+      <span>-${formatMoney(transaction.discount)}</span>
+    </div>
+    ` : ''}
     <div class="row" style="font-size: 11px;">
       <span>Payment Method:</span>
       <span class="font-bold">${transaction.payment}</span>
@@ -632,6 +644,12 @@ export function generateReceiptHtml({
         <span>Payment Method:</span>
         <strong>${transaction.payment}</strong>
       </div>
+      ${(transaction.discount || 0) > 0 ? `
+      <div class="payment-row">
+        <span>Discount:</span>
+        <span style="font-family: monospace; color: #be123c;">-${formatMoney(transaction.discount)}</span>
+      </div>
+      ` : ''}
       <div class="payment-row">
         <span>Amount Tendered:</span>
         <span style="font-family: monospace;">${formatMoney(transaction.paid)}</span>

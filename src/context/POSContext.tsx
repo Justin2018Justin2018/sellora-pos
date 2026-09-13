@@ -32,6 +32,9 @@ import {
   GeneralUnit,
   TaxRule
 } from '../types/pos';
+import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
+import { enqueueSync, processSyncQueue } from '../services/syncEngine';
+import { checkRealConnectivity } from '../services/connectivity';
 import {
   getCurrentTenantId,
   setCurrentTenantId,
@@ -1786,6 +1789,47 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Transactions (Cyber POS)
+  /**
+   * Writes a completed sale into the offline queue in the background.
+   * Deliberately fire-and-forget and wrapped in try/catch: the cashier's
+   * sale is already recorded in the existing local state/localStorage
+   * flow above regardless of what happens here, so a storage or network
+   * hiccup in this layer must never surface as an error to the cashier
+   * or block the receipt from opening.
+   */
+  const queueSaleForSync = useCallback((tx: Transaction) => {
+    (async () => {
+      try {
+        const localId = generateLocalId();
+        const deviceId = await getDeviceId();
+        const now = new Date().toISOString();
+        await offlineDb.sales.add({
+          localId,
+          shopId: currentShopId,
+          userId: currentUser?.name,
+          deviceId,
+          createdAt: now,
+          updatedAt: now,
+          syncStatus: 'pending',
+          receipt: tx.receipt,
+          payload: tx as unknown as Record<string, unknown>,
+        });
+        await enqueueSync('sale', localId, 'CREATE');
+
+        const online = await checkRealConnectivity();
+        if (online) {
+          processSyncQueue().catch(() => {
+            // Swallowed deliberately - the queue entry remains 'pending'
+            // and will be retried by the backoff schedule / next Sync Now.
+          });
+        }
+      } catch {
+        // Same reasoning as above - never let offline-queueing errors
+        // reach the cashier. The sale itself already succeeded locally.
+      }
+    })();
+  }, [currentShopId, currentUser]);
+
   const recordCyberSale = (saleData: Omit<Transaction, 'id' | 'receipt' | 'date' | 'staff' | 'shopId'>): Transaction => {
     const receiptNum = `MJRC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(transactions.length + 1).padStart(5, '0')}`;
     const newTx: Transaction = {
@@ -1799,6 +1843,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setTransactions((prev) => [newTx, ...prev]);
+    queueSaleForSync(newTx);
 
     // Update or add customer record
     if (newTx.phone) {

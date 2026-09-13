@@ -7,15 +7,9 @@ import {
   Customer
 } from '../types/pos';
 
-// Read client credentials lazily from environment.
-// Supabase's dashboard now calls this the "publishable" key, but older
-// projects/docs call it the "anon" key - they're the same kind of key,
-// so accept either env var name.
+// Read client credentials lazily from environment
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 let supabaseInstance: SupabaseClient | null = null;
 
@@ -159,6 +153,58 @@ export const signOutSupabaseUser = async (): Promise<void> => {
   const client = getSupabase();
   if (!client) return;
   await client.auth.signOut();
+};
+
+export interface ShopMembership {
+  shopId: string;
+  role: string;
+}
+
+/**
+ * Looks up which shop (if any) the currently signed-in user belongs to,
+ * via the shop_members table. This is what the login gate uses to decide
+ * whether a signed-in user already has a shop, or needs to link/create one.
+ * Relies on RLS (a user can only ever see their own shop_members row).
+ */
+export const getMyShopMembership = async (): Promise<ShopMembership | null> => {
+  const client = getSupabase();
+  if (!client) return null;
+  const { data: userData } = await client.auth.getUser();
+  const uid = userData?.user?.id;
+  if (!uid) return null;
+
+  const { data, error } = await client
+    .from('shop_members')
+    .select('shop_id, role')
+    .eq('user_id', uid)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return { shopId: data.shop_id as string, role: (data.role as string) || 'owner' };
+};
+
+/**
+ * Links the currently signed-in user to a shop_id via the claim_shop RPC.
+ * Used as a recovery path if a signup's automatic claim step failed, or for
+ * a returning user whose account somehow has no shop_members row yet.
+ * Same server-side guarantee as signUpShopAccount: only the first claimant
+ * for a given shop_id succeeds.
+ */
+export const claimShopForCurrentUser = async (shopId: string): Promise<SupabaseAuthResult> => {
+  const client = getSupabase();
+  if (!client) return { success: false, message: 'Supabase is not configured.' };
+
+  const { error } = await client.rpc('claim_shop', { p_shop_id: shopId });
+  if (error) {
+    return {
+      success: false,
+      message: error.message.includes('already claimed')
+        ? 'That Shop ID is already registered to another account. Choose a different Shop ID, or ask that shop\'s owner to add you as staff.'
+        : `Could not link shop: ${error.message}`,
+    };
+  }
+  return { success: true, message: 'Shop linked to your account.' };
 };
 
 /**

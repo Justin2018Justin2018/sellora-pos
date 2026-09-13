@@ -12,7 +12,9 @@ import {
   Printer,
   ShieldCheck,
   CheckCircle2,
-  XCircle
+  XCircle,
+  History,
+  X
 } from 'lucide-react';
 import { StockItem } from '../../types/pos';
 
@@ -30,10 +32,12 @@ export const StockView: React.FC = () => {
     formatMoney,
     hasRole,
     addToast,
+    auditLog,
   } = usePOS();
 
   const [filterMode, setFilterMode] = useState<'all' | 'low' | 'out'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [historyItemName, setHistoryItemName] = useState<string | null>(null);
 
   // Restock Form
   const [restockItemName, setRestockItemName] = useState('');
@@ -88,6 +92,15 @@ export const StockView: React.FC = () => {
       outCount: outOfStockItems.length,
     };
   }, [stock, stockRemaining, lowStockItems, outOfStockItems]);
+
+  // Filters the shared activity log down to entries mentioning this
+  // specific item - reuses data already recorded by addStock/recordWastage
+  // (see logAudit calls in POSContext), no new data model needed.
+  const itemHistory = useMemo(() => {
+    if (!historyItemName) return [];
+    const needle = historyItemName.trim().toUpperCase();
+    return auditLog.filter((entry) => entry.details.toUpperCase().includes(needle)).slice(0, 50);
+  }, [auditLog, historyItemName]);
 
   // Handle Restock Submit
   const handleRestockSubmit = (e: React.FormEvent) => {
@@ -438,6 +451,7 @@ export const StockView: React.FC = () => {
                 <th className="py-3 px-3 text-right">Unit Valuation</th>
                 <th className="py-3 px-3 text-right">Stock Value</th>
                 <th className="py-3 px-3 text-center">Status</th>
+                <th className="py-3 px-3 text-center">History</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -489,6 +503,16 @@ export const StockView: React.FC = () => {
                           </>
                         )}
                       </span>
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <button
+                        onClick={() => setHistoryItemName(item.name)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                        title={`View stock history for ${item.name}`}
+                      >
+                        <History className="w-3.5 h-3.5" />
+                        <span>History</span>
+                      </button>
                     </td>
                   </tr>
                 );
@@ -563,6 +587,55 @@ export const StockView: React.FC = () => {
           </div>
         </form>
       </div>
+
+      {/* Per-item Stock History Modal */}
+      {historyItemName && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <History className="w-4 h-4 text-blue-600" />
+                  <span>Stock History</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{historyItemName}</p>
+              </div>
+              <button
+                onClick={() => setHistoryItemName(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-4 space-y-2 flex-1">
+              {itemHistory.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-8">
+                  No restock, wastage, or adjustment history recorded for this item yet.
+                </p>
+              ) : (
+                itemHistory.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs"
+                  >
+                    <p className="font-semibold text-slate-700 dark:text-slate-200">{entry.details}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {entry.staff} &middot;{' '}
+                      {new Date(entry.time).toLocaleString('en-GB', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

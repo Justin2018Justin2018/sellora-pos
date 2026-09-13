@@ -56,6 +56,7 @@ export const GeneralSaleView: React.FC = () => {
       qty: items.reduce((s: number, i: any) => s + (i.qty || 1), 0) || 1,
       price: sale.total,
       subtotal: sale.subtotal || sale.total,
+      discount: sale.discount || 0,
       material: 0,
       materialTotal: 0,
       profit: sale.profit || 0,
@@ -560,6 +561,12 @@ export const GeneralSaleView: React.FC = () => {
                 <span>TOTAL:</span>
                 <span className="text-emerald-600">{formatMoney(completedSale.total)}</span>
               </div>
+              {(completedSale.discount || 0) > 0 && (
+                <div className="flex justify-between text-rose-600 dark:text-rose-400">
+                  <span>Discount:</span>
+                  <span>-{formatMoney(completedSale.discount)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>Payment ({completedSale.payment}):</span>
                 <span>{formatMoney(completedSale.paid)}</span>

@@ -287,6 +287,7 @@ export interface ElectronicsSale {
   buy: number;
   sell: number;
   cost: number;
+  discount?: number;
   total: number;
   profit: number;
   customer: string;

@@ -1,14 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   TenantAccount,
   SubscriptionPlan,
   SubscriptionStatus,
   SubscriptionPlanConfig,
   SubscriptionAuditEntry,
+  BusinessMode,
 } from '../../types/pos';
 import {
   getTenants,
-  createTenant,
   updateTenant,
   renewTenantSubscription,
   suspendTenant,
@@ -20,11 +20,15 @@ import {
   getSubscriptionAuditLog,
   getSaaSPlans,
   saveSaaSPlans,
-  loginSuperAdmin,
   logoutSuperAdmin,
   getSuperAdminSession,
   setCurrentTenantId,
+  checkSuperAdminAccess,
+  loginOrSetupSuperAdminPin,
+  changeSuperAdminPin,
+  syncTenantsFromCloudIfAuthorized,
 } from '../../services/saasService';
+import { getSupabase } from '../../services/supabase';
 import {
   BusinessTypeConfig,
   getBusinessTypes,
@@ -109,6 +113,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   // New Shop Form State
   const [newShopForm, setNewShopForm] = useState({
     shopName: '',
+    businessType: 'general_shop' as BusinessMode,
     ownerName: '',
     phone: '',
     email: '',
@@ -120,27 +125,56 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     location: '',
     notes: '',
   });
+  const [createShopBusy, setCreateShopBusy] = useState(false);
+  const [createShopError, setCreateShopError] = useState<string | null>(null);
 
   // Renew Form State
   const [renewMonths, setRenewMonths] = useState(1);
   const [customExpiry, setCustomExpiry] = useState('');
 
   const [session, setSession] = useState(() => getSuperAdminSession());
-  const [loginUser, setLoginUser] = useState('superadmin');
-  const [loginPass, setLoginPass] = useState('');
+  const [accessCheck, setAccessCheck] = useState<{ isAdmin: boolean; hasPinSet: boolean } | null>(null);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [pinInput, setPinInput] = useState('');
+  const [pinConfirmInput, setPinConfirmInput] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
+
+  useEffect(() => {
+    if (session) return;
+    let cancelled = false;
+    setCheckingAccess(true);
+    checkSuperAdminAccess().then((result) => {
+      if (!cancelled) {
+        setAccessCheck(result);
+        setCheckingAccess(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const success = await loginSuperAdmin(loginPass, loginUser);
-    if (success) {
+    setLoginBusy(true);
+    setLoginError('');
+    const result = await loginOrSetupSuperAdminPin(pinInput, pinConfirmInput);
+    setLoginBusy(false);
+    if (result.success) {
       setSession(getSuperAdminSession());
       refreshData();
-      setLoginError('');
     } else {
-      setLoginError('Invalid credentials, or no super admin is configured for this deployment (set VITE_SUPERADMIN_EMAIL / VITE_SUPERADMIN_PASSWORD_HASH).');
+      setLoginError(result.message);
     }
   };
+
+  const [isChangePinOpen, setIsChangePinOpen] = useState(false);
+  const [newPinInput, setNewPinInput] = useState('');
+  const [newPinConfirmInput, setNewPinConfirmInput] = useState('');
+  const [changePinBusy, setChangePinBusy] = useState(false);
+  const [changePinMessage, setChangePinMessage] = useState<string | null>(null);
 
   const refreshData = () => {
     setTenants(getTenants());
@@ -198,11 +232,20 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     });
   }, [tenants, searchQuery, statusFilter, planFilter]);
 
-  // Handle Create Shop Submit
-  const handleCreateShopSubmit = (e: React.FormEvent) => {
+  // Handle Create Shop Submit - calls the create-business Edge Function,
+  // which is the only safe place to provision a real login for someone
+  // else (it holds the service-role key server-side; this dashboard
+  // never does). See supabase/functions/create-business.
+  const handleCreateShopSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newShopForm.shopName.trim() || !newShopForm.ownerName.trim() || !newShopForm.username.trim()) {
-      alert('Please fill out all required fields (Shop Name, Owner Name, Username).');
+    setCreateShopError(null);
+
+    if (!newShopForm.shopName.trim() || !newShopForm.ownerName.trim() || !newShopForm.email.trim()) {
+      setCreateShopError('Please fill out Shop Name, Owner Name, and Email.');
+      return;
+    }
+    if (!newShopForm.password || newShopForm.password.length < 6) {
+      setCreateShopError('Set a password of at least 6 characters for the new owner.');
       return;
     }
 
@@ -211,42 +254,53 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     expiryDate.setMonth(expiryDate.getMonth() + Number(newShopForm.monthsToAdd || 1));
     const expiryStr = expiryDate.toISOString().slice(0, 10);
 
-    const res = createTenant({
-      shopName: newShopForm.shopName,
-      ownerName: newShopForm.ownerName,
-      phone: newShopForm.phone,
-      email: newShopForm.email,
-      username: newShopForm.username,
-      password: newShopForm.password,
-      plan: newShopForm.plan,
-      startDate: newShopForm.startDate,
-      expiryDate: expiryStr,
-      location: newShopForm.location,
-      notes: newShopForm.notes,
-    });
-
-    if (res.success && res.tenant) {
-      refreshData();
-      setIsCreateModalOpen(false);
-      setNewShopForm({
-        shopName: '',
-        ownerName: '',
-        phone: '',
-        email: '',
-        username: '',
-        password: '',
-        plan: 'STANDARD',
-        startDate: new Date().toISOString().slice(0, 10),
-        monthsToAdd: 1,
-        location: '',
-        notes: '',
-      });
-      // Show created credentials
-      setResetPassTenant(res.tenant);
-      setGeneratedNewPass(res.tenant.password || 'password123');
-    } else {
-      alert(res.message);
+    const client = getSupabase();
+    if (!client) {
+      setCreateShopError('Supabase is not configured in this deployment.');
+      return;
     }
+
+    setCreateShopBusy(true);
+    const { data, error } = await client.functions.invoke('create-business', {
+      body: {
+        shopName: newShopForm.shopName.trim(),
+        businessType: newShopForm.businessType,
+        ownerName: newShopForm.ownerName.trim(),
+        phone: newShopForm.phone.trim(),
+        email: newShopForm.email.trim(),
+        password: newShopForm.password,
+        plan: newShopForm.plan,
+        startDate: newShopForm.startDate,
+        expiryDate: expiryStr,
+        location: newShopForm.location.trim(),
+        notes: newShopForm.notes.trim(),
+      },
+    });
+    setCreateShopBusy(false);
+
+    if (error || !data?.success) {
+      setCreateShopError(data?.error || error?.message || 'Could not create the business. Please try again.');
+      return;
+    }
+
+    await syncTenantsFromCloudIfAuthorized();
+    refreshData();
+    setIsCreateModalOpen(false);
+    setCreateShopError(null);
+    setNewShopForm({
+      shopName: '',
+      businessType: 'general_shop',
+      ownerName: '',
+      phone: '',
+      email: '',
+      username: '',
+      password: '',
+      plan: 'STANDARD',
+      startDate: new Date().toISOString().slice(0, 10),
+      monthsToAdd: 1,
+      location: '',
+      notes: '',
+    });
   };
 
   // Copy helper
@@ -303,53 +357,73 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             <p className="text-xs text-slate-400 mt-1">Platform Owner & Multi-Tenant Control</p>
           </div>
 
-          <form onSubmit={handleAdminLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                Admin Username / Email
-              </label>
-              <input
-                type="text"
-                value={loginUser}
-                onChange={(e) => setLoginUser(e.target.value)}
-                placeholder="superadmin"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-blue-500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                Master Security Password
-              </label>
-              <input
-                type="password"
-                value={loginPass}
-                onChange={(e) => setLoginPass(e.target.value)}
-                placeholder="Enter master password"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-blue-500"
-                required
-              />
-            </div>
-
-            {loginError && (
-              <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800/50 text-rose-300 text-xs flex items-center gap-2">
+          {checkingAccess ? (
+            <div className="py-8 text-center text-sm text-slate-400">Checking your access…</div>
+          ) : !accessCheck?.isAdmin ? (
+            <div className="p-4 rounded-xl bg-rose-950/50 border border-rose-800/50 text-rose-300 text-sm space-y-2">
+              <p className="font-semibold flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{loginError}</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm shadow-lg shadow-blue-500/30 transition-all active:scale-95 cursor-pointer"
-            >
-              Sign In to Super Admin
-            </button>
-
-            <div className="pt-2 text-center text-xs text-slate-500">
-              <p>Set <code className="bg-slate-800 px-1.5 py-0.5 rounded text-blue-400 font-mono">VITE_SUPERADMIN_EMAIL</code> and <code className="bg-slate-800 px-1.5 py-0.5 rounded text-blue-400 font-mono">VITE_SUPERADMIN_PASSWORD_HASH</code> in your .env to enable this login.</p>
+                Not authorized
+              </p>
+              <p className="text-rose-300/80 text-xs leading-relaxed">
+                Your signed-in account is not registered as a Sellora platform super admin. Only accounts with a
+                real row in the <code className="bg-slate-800 px-1 py-0.5 rounded">super_admins</code> table can
+                access this dashboard - ask the platform owner to add you.
+              </p>
             </div>
-          </form>
+          ) : (
+            <form onSubmit={handleAdminLogin} className="space-y-4">
+              {!accessCheck.hasPinSet && (
+                <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-300 text-xs">
+                  First time here - choose a PIN to protect this dashboard on this device.
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  {accessCheck.hasPinSet ? 'Admin PIN' : 'Choose a PIN (min. 6 characters)'}
+                </label>
+                <input
+                  type="password"
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  placeholder="••••••"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-blue-500"
+                  autoFocus
+                  required
+                />
+              </div>
+
+              {!accessCheck.hasPinSet && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Confirm PIN</label>
+                  <input
+                    type="password"
+                    value={pinConfirmInput}
+                    onChange={(e) => setPinConfirmInput(e.target.value)}
+                    placeholder="••••••"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+              )}
+
+              {loginError && (
+                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800/50 text-rose-300 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loginBusy}
+                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold text-sm shadow-lg shadow-blue-500/30 transition-all active:scale-95 cursor-pointer"
+              >
+                {loginBusy ? 'Please wait…' : accessCheck.hasPinSet ? 'Sign In to Super Admin' : 'Create PIN & Sign In'}
+              </button>
+            </form>
+          )}
 
           <div className="mt-6 pt-4 border-t border-slate-800 text-center">
             <button
@@ -418,6 +492,15 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             <span className="hidden md:inline">Open POS Terminal</span>
           </button>
 
+          {/* Change PIN */}
+          <button
+            onClick={() => setIsChangePinOpen(true)}
+            className="p-2 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
+            title="Change your Super Admin PIN"
+          >
+            <KeyRound className="w-4 h-4" />
+          </button>
+
           {/* Sign Out Super Admin */}
           <button
             onClick={() => {
@@ -431,6 +514,68 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </button>
         </div>
       </header>
+
+      {isChangePinOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-white font-bold text-base mb-1">Change Super Admin PIN</h3>
+            <p className="text-slate-400 text-xs mb-4">This only changes your local sign-in PIN for this dashboard.</p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setChangePinBusy(true);
+                setChangePinMessage(null);
+                const result = await changeSuperAdminPin(newPinInput, newPinConfirmInput);
+                setChangePinBusy(false);
+                setChangePinMessage(result.message);
+                if (result.success) {
+                  setNewPinInput('');
+                  setNewPinConfirmInput('');
+                  setTimeout(() => setIsChangePinOpen(false), 1200);
+                }
+              }}
+              className="space-y-3"
+            >
+              <input
+                type="password"
+                value={newPinInput}
+                onChange={(e) => setNewPinInput(e.target.value)}
+                placeholder="New PIN (min. 6 characters)"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-blue-500"
+                required
+                autoFocus
+              />
+              <input
+                type="password"
+                value={newPinConfirmInput}
+                onChange={(e) => setNewPinConfirmInput(e.target.value)}
+                placeholder="Confirm new PIN"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-blue-500"
+                required
+              />
+              {changePinMessage && (
+                <div className="text-xs text-center text-slate-300">{changePinMessage}</div>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsChangePinOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={changePinBusy}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-sm font-bold transition-colors"
+                >
+                  {changePinBusy ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Main Container */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full overflow-y-auto">
@@ -1176,6 +1321,40 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">
+                  Business Type *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(
+                    [
+                      { value: 'cyber', label: 'Cyber Café' },
+                      { value: 'electronics', label: 'Electronics' },
+                      { value: 'general_shop', label: 'General Shop' },
+                      { value: 'gas', label: 'Gas' },
+                      { value: 'clothing', label: 'Boutique' },
+                      { value: 'restaurant', label: 'Kitchen & Diners' },
+                      { value: 'pharmacy', label: 'Clinical & Health' },
+                      { value: 'other', label: 'Customisable' },
+                      { value: 'all', label: 'All-in-One' },
+                    ] as { value: BusinessMode; label: string }[]
+                  ).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setNewShopForm({ ...newShopForm, businessType: opt.value })}
+                      className={`px-2.5 py-2 rounded-lg text-[11px] font-bold border transition-all ${
+                        newShopForm.businessType === opt.value
+                          ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
+                          : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -1193,10 +1372,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Email Address
+                    Owner Email (used to sign in) *
                   </label>
                   <input
                     type="email"
+                    required
                     value={newShopForm.email}
                     onChange={(e) => setNewShopForm({ ...newShopForm, email: e.target.value })}
                     placeholder="owner@example.com"
@@ -1206,33 +1386,28 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Login Username *
+                    Owner Password *
                   </label>
                   <input
                     type="text"
                     required
-                    value={newShopForm.username}
-                    onChange={(e) => setNewShopForm({ ...newShopForm, username: e.target.value })}
-                    placeholder="e.g. apexcyber"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-hidden focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Initial Password
-                  </label>
-                  <input
-                    type="text"
+                    minLength={6}
                     value={newShopForm.password}
                     onChange={(e) => setNewShopForm({ ...newShopForm, password: e.target.value })}
-                    placeholder="Leave blank to auto-generate"
+                    placeholder="At least 6 characters - share this with the owner"
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-hidden focus:border-blue-500"
                   />
                 </div>
               </div>
+
+              {createShopError && (
+                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-800/50 text-rose-300 text-xs">
+                  {createShopError}
+                </div>
+              )}
+
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
@@ -1302,9 +1477,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
+                  disabled={createShopBusy}
+                  className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
                 >
-                  Register & Provision Shop
+                  {createShopBusy ? 'Creating…' : 'Register & Provision Shop'}
                 </button>
               </div>
             </form>

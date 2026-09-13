@@ -123,6 +123,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
       `*ITEMS / SERVICES:*\n` +
       `${itemsList}\n` +
       `${divider}\n` +
+      ((transaction.discount || 0) > 0 ? `Discount: -${formatMoney(transaction.discount)}\n` : '') +
       `*TOTAL AMOUNT: ${formatMoney(transaction.total)}*\n` +
       `Amount Paid: ${formatMoney(transaction.paid)}\n` +
       `Change / Balance: ${formatMoney(transaction.change)}\n` +
@@ -337,6 +338,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
                     <span className="text-slate-500">Payment Method:</span>
                     <span className="font-bold text-slate-900">{transaction.payment}</span>
                   </div>
+                  {(transaction.discount || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Discount:</span>
+                      <span className="font-mono font-semibold text-rose-600">-{formatMoney(transaction.discount)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-slate-500">Amount Tendered:</span>
                     <span className="font-mono font-semibold text-slate-900">{formatMoney(transaction.paid)}</span>
@@ -420,6 +427,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
                 <span>TOTAL:</span>
                 <span>{formatMoney(transaction.total)}</span>
               </div>
+              {(transaction.discount || 0) > 0 && (
+                <div className="flex justify-between text-[11px]">
+                  <span>Discount:</span>
+                  <span>-{formatMoney(transaction.discount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-[11px]">
                 <span>Paid ({transaction.payment}):</span>
                 <span>{formatMoney(transaction.paid)}</span>
@@ -479,6 +492,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
                 <span>TOTAL:</span>
                 <span>{formatMoney(transaction.total)}</span>
               </div>
+              {(transaction.discount || 0) > 0 && (
+                <div className="flex justify-between text-[9px]">
+                  <span>Discount:</span>
+                  <span>-{formatMoney(transaction.discount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-[9px]">
                 <span>Paid:</span>
                 <span>{formatMoney(transaction.paid)}</span>

@@ -14,9 +14,14 @@ import {
   AlertTriangle,
   Package
 } from 'lucide-react';
-import { ElectronicsProduct } from '../../types/pos';
+import { ElectronicsProduct, Transaction } from '../../types/pos';
+import { electronicsSaleToTransaction } from '../../utils/electronicsReceiptAdapter';
 
-export const ElectronicsView: React.FC = () => {
+interface ElectronicsViewProps {
+  onSaleCompleted?: (tx: Transaction) => void;
+}
+
+export const ElectronicsView: React.FC<ElectronicsViewProps> = ({ onSaleCompleted }) => {
   const {
     electronicsProducts,
     electronicsSales,
@@ -44,6 +49,7 @@ export const ElectronicsView: React.FC = () => {
   const [saleWarranty, setSaleWarranty] = useState('');
   const [salePayment, setSalePayment] = useState<any>('Cash');
   const [salePaid, setSalePaid] = useState<number>(0);
+  const [saleDiscount, setSaleDiscount] = useState<number>(0);
   const [barcodeInput, setBarcodeInput] = useState('');
 
   // Add Product Form State
@@ -71,7 +77,9 @@ export const ElectronicsView: React.FC = () => {
   }, [electronicsProducts, selectedProductId]);
 
   // Sale calculations
-  const saleTotal = selectedProduct ? Number(selectedProduct.sell || 0) * saleQty : 0;
+  const saleGrossTotal = selectedProduct ? Number(selectedProduct.sell || 0) * saleQty : 0;
+  const saleDiscountClamped = Math.min(Math.max(0, saleDiscount || 0), saleGrossTotal);
+  const saleTotal = saleGrossTotal - saleDiscountClamped;
   const saleCost = selectedProduct ? Number(selectedProduct.buy || 0) * saleQty : 0;
   const saleProfit = saleTotal - saleCost;
   const saleChange = Math.max(0, (salePaid || 0) - saleTotal);
@@ -122,7 +130,7 @@ export const ElectronicsView: React.FC = () => {
       return;
     }
 
-    recordElectronicsSale({
+    const savedSale = recordElectronicsSale({
       productId: selectedProduct.id,
       product: selectedProduct.name,
       barcode: selectedProduct.barcode,
@@ -133,6 +141,7 @@ export const ElectronicsView: React.FC = () => {
       buy: selectedProduct.buy,
       sell: selectedProduct.sell,
       cost: saleCost,
+      discount: saleDiscountClamped,
       total: saleTotal,
       profit: saleProfit,
       customer: saleCustomer.trim() || 'Walk-in Customer',
@@ -144,9 +153,14 @@ export const ElectronicsView: React.FC = () => {
       warranty: saleWarranty.trim() || selectedProduct.warranty,
     });
 
+    if (onSaleCompleted) {
+      onSaleCompleted(electronicsSaleToTransaction(savedSale));
+    }
+
     // Reset sale form
     setSelectedProductId('');
     setSaleQty(1);
+    setSaleDiscount(0);
     setBarcodeInput('');
     setSaleCustomer('Walk-in Customer');
     setSalePhone('');
@@ -403,7 +417,22 @@ export const ElectronicsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/50 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/50 text-xs">
+            <div>
+              <label htmlFor="electronics-discount-input" className="block text-slate-500 mb-1">
+                Discount (KSh):
+              </label>
+              <input
+                id="electronics-discount-input"
+                type="number"
+                min={0}
+                max={saleGrossTotal}
+                value={saleDiscount || ''}
+                onChange={(e) => setSaleDiscount(Math.max(0, Number(e.target.value) || 0))}
+                placeholder="0"
+                className="w-full px-2.5 py-1.5 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 font-mono text-slate-900 dark:text-white text-xs focus:outline-none focus:border-purple-500"
+              />
+            </div>
             <div>
               <span className="text-slate-500">Total Price:</span>
               <p className="text-base font-black text-slate-900 dark:text-white font-mono">{formatMoney(saleTotal)}</p>

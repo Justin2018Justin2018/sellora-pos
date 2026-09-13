@@ -66,6 +66,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
   // Payment State
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [amountPaid, setAmountPaid] = useState<number>(0);
+  const [discountInput, setDiscountInput] = useState<number>(0);
   const [isStkPushing, setIsStkPushing] = useState(false);
   const [mpesaReceiptCode, setMpesaReceiptCode] = useState('');
 
@@ -158,20 +159,25 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
       materialCost += lineMat;
     });
 
-    let total = subtotal;
+    // Discount is applied to the subtotal before tax, clamped so it can
+    // never exceed the subtotal itself (no negative totals).
+    const discount = Math.min(Math.max(0, discountInput || 0), subtotal);
+    const discountedSubtotal = subtotal - discount;
+
+    let total = discountedSubtotal;
     let taxAmount = 0;
-    let netSubtotal = subtotal;
+    let netSubtotal = discountedSubtotal;
 
     if (taxEnabled && taxRate > 0) {
       if (taxMode === 'exclusive') {
-        taxAmount = subtotal * (taxRate / 100);
-        total = subtotal + taxAmount;
-        netSubtotal = subtotal;
+        taxAmount = discountedSubtotal * (taxRate / 100);
+        total = discountedSubtotal + taxAmount;
+        netSubtotal = discountedSubtotal;
       } else {
         // Inclusive
-        netSubtotal = subtotal / (1 + taxRate / 100);
-        taxAmount = subtotal - netSubtotal;
-        total = subtotal;
+        netSubtotal = discountedSubtotal / (1 + taxRate / 100);
+        taxAmount = discountedSubtotal - netSubtotal;
+        total = discountedSubtotal;
       }
     }
 
@@ -180,6 +186,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
 
     return {
       subtotal,
+      discount,
       total,
       materialCost,
       profit,
@@ -190,7 +197,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
       taxMode,
       taxName,
     };
-  }, [cartRows, amountPaid, taxEnabled, taxRate, taxMode, taxName]);
+  }, [cartRows, amountPaid, discountInput, taxEnabled, taxRate, taxMode, taxName]);
 
   // Sync default paid amount when total changes
   useEffect(() => {
@@ -318,6 +325,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
       qty: lineItems.reduce((acc, l) => acc + l.qty, 0),
       price: totals.subtotal,
       subtotal: totals.subtotal,
+      discount: totals.discount,
       total: totals.total,
       material: totals.materialCost,
       materialTotal: totals.materialCost,
@@ -347,6 +355,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
     setCustomerIdNumber('');
     setCustomerAddress('');
     setPaymentMethod('Cash');
+    setDiscountInput(0);
     setCartRows([
       {
         id: `row_${Date.now()}`,
@@ -367,6 +376,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
     setCustomerIdNumber('');
     setCustomerAddress('');
     setPaymentMethod('Cash');
+    setDiscountInput(0);
     setCartRows([
       {
         id: `row_${Date.now()}`,
@@ -751,6 +761,29 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
               <span>Subtotal:</span>
               <span className="font-mono font-semibold text-slate-900 dark:text-white">{formatMoney(totals.subtotal)}</span>
             </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <label htmlFor="sale-discount-input" className="text-slate-600 dark:text-slate-400 shrink-0">
+                Discount (KSh):
+              </label>
+              <input
+                id="sale-discount-input"
+                type="number"
+                min={0}
+                max={totals.subtotal}
+                value={discountInput || ''}
+                onChange={(e) => setDiscountInput(Math.max(0, Number(e.target.value) || 0))}
+                placeholder="0"
+                className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono text-slate-900 dark:text-white text-xs focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            {totals.discount > 0 && (
+              <div className="flex justify-between text-rose-600 dark:text-rose-400 font-medium">
+                <span>Discount Applied:</span>
+                <span className="font-mono">-{formatMoney(totals.discount)}</span>
+              </div>
+            )}
+
             {totals.taxAmount > 0 && (
               <>
                 {totals.taxMode === 'inclusive' && (

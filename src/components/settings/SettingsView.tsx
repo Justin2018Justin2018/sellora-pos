@@ -20,6 +20,7 @@ import {
   ExternalLink,
   HelpCircle,
   Zap,
+  History,
 } from 'lucide-react';
 import { BusinessProfile } from '../../types/pos';
 import { BusinessTypeSelectionModal } from '../subscription/BusinessTypeSelectionModal';
@@ -44,6 +45,7 @@ export const SettingsView: React.FC = () => {
     updateAdminPassword,
     businessMode,
     currentTenant,
+    auditLog,
   } = usePOS();
 
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -750,6 +752,48 @@ export const SettingsView: React.FC = () => {
               )}
             </div>
           </div>
+
+          {/* Activity Log - who changed what and when, admin/owner only */}
+          {hasRole('admin') && (
+            <div className="rounded-3xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-200 dark:border-slate-800">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                <History className="w-4 h-4 text-blue-600" />
+                <span>Activity Log</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                A record of important changes made in this shop - stock adjustments, pricing changes, deletions, and
+                more - so you always know who did what and when.
+              </p>
+
+              {auditLog.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">No activity recorded yet.</p>
+              ) : (
+                <div className="max-h-80 overflow-y-auto -mx-2 px-2 space-y-1">
+                  {auditLog.slice(0, 100).map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="flex items-start justify-between gap-3 py-2 px-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 text-xs border-b border-slate-50 dark:border-slate-800/60 last:border-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-700 dark:text-slate-200 truncate">{entry.details}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {entry.staff} &middot; {entry.action}
+                        </p>
+                      </div>
+                      <span className="text-[10px] text-slate-400 whitespace-nowrap shrink-0">
+                        {new Date(entry.time).toLocaleString('en-GB', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
