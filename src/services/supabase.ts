@@ -474,3 +474,116 @@ export const deleteTransactionFromSupabase = async (id: number): Promise<boolean
   }
 };
 
+/**
+ * Pull stock items from Supabase.
+ *
+ * Previously stock only ever synced ONE way (local -> cloud via
+ * syncStockToSupabase). There was no matching read-back, so a second
+ * device or a cleared browser would never see stock that was already
+ * safely stored in Supabase. This closes that gap.
+ */
+export const fetchStockFromSupabase = async (
+  shopId?: string
+): Promise<StockItem[] | null> => {
+  const client = getSupabase();
+  if (!client) return null;
+
+  try {
+    let query = client.from('pos_stock').select('*').order('name', { ascending: true });
+    if (shopId) {
+      query = query.eq('shop_id', shopId);
+    }
+    const { data, error } = await query;
+    if (error || !data) {
+      return null;
+    }
+
+    return data.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      category: row.category || undefined,
+      unit: row.unit,
+      costPrice: Number(row.unit_cost || 0),
+      sellingPrice: Number(row.retail_price || 0),
+      openingStock: Number(row.opening_stock || 0),
+      stockAdded: Number(row.stock_added || 0),
+      reorderLevel: Number(row.reorder_level || 5),
+    }));
+  } catch (err) {
+    console.warn('Error fetching stock from Supabase:', err);
+    return null;
+  }
+};
+
+/**
+ * Pull expenses from Supabase. See fetchStockFromSupabase for why this
+ * exists - syncExpenseToSupabase was write-only before this.
+ */
+export const fetchExpensesFromSupabase = async (
+  shopId?: string
+): Promise<Expense[] | null> => {
+  const client = getSupabase();
+  if (!client) return null;
+
+  try {
+    let query = client.from('pos_expenses').select('*').order('date', { ascending: false });
+    if (shopId) {
+      query = query.eq('shop_id', shopId);
+    }
+    const { data, error } = await query;
+    if (error || !data) {
+      return null;
+    }
+
+    return data.map((row: any) => ({
+      id: Number(row.id),
+      date: row.date,
+      desc: row.title,
+      amount: Number(row.amount || 0),
+      category: row.category || undefined,
+      payment: row.payment_method || undefined,
+      staff: row.recorded_by || undefined,
+    }));
+  } catch (err) {
+    console.warn('Error fetching expenses from Supabase:', err);
+    return null;
+  }
+};
+
+/**
+ * Pull debts from Supabase. See fetchStockFromSupabase for why this
+ * exists - syncDebtToSupabase was write-only before this.
+ */
+export const fetchDebtsFromSupabase = async (
+  shopId?: string
+): Promise<DebtRecord[] | null> => {
+  const client = getSupabase();
+  if (!client) return null;
+
+  try {
+    let query = client.from('pos_debts').select('*').order('date', { ascending: false });
+    if (shopId) {
+      query = query.eq('shop_id', shopId);
+    }
+    const { data, error } = await query;
+    if (error || !data) {
+      return null;
+    }
+
+    return data.map((row: any) => ({
+      id: Number(row.id),
+      date: row.date,
+      name: row.customer_name,
+      phone: row.customer_phone || undefined,
+      reason: row.service || '',
+      service: row.service || '',
+      qty: 1,
+      original: Number(row.original || 0),
+      paid: Number(row.paid || 0),
+      staff: row.staff || undefined,
+    }));
+  } catch (err) {
+    console.warn('Error fetching debts from Supabase:', err);
+    return null;
+  }
+};

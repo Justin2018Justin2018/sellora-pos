@@ -50,6 +50,9 @@ import {
   syncStockToSupabase,
   syncDebtToSupabase,
   fetchTransactionsFromSupabase,
+  fetchStockFromSupabase,
+  fetchExpensesFromSupabase,
+  fetchDebtsFromSupabase,
   testSupabaseConnection,
   deleteTransactionFromSupabase
 } from '../services/supabase';
@@ -898,6 +901,60 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 }
               })
               .catch((err) => console.warn('Supabase remote pull notice:', err));
+
+            // Stock, expenses, and debts were previously write-only to
+            // Supabase (see syncStockToSupabase / syncExpenseToSupabase /
+            // syncDebtToSupabase below) - nothing ever read them back, so
+            // a second device or a cleared browser would show empty/stale
+            // data even though it was safely stored in the cloud. Pull
+            // and merge them the same additive, non-destructive way
+            // transactions already work above: cloud items not already
+            // present locally (by id) get added; existing local items are
+            // left untouched so any in-progress local edits aren't clobbered.
+            fetchStockFromSupabase(currentShopId)
+              .then((remoteStock) => {
+                if (remoteStock && remoteStock.length > 0) {
+                  setStock((prev) => {
+                    const existingIds = new Set(prev.map((s) => s.id || s.name));
+                    const newItems = remoteStock.filter((s) => !existingIds.has(s.id || s.name));
+                    if (newItems.length > 0) {
+                      return [...prev, ...newItems];
+                    }
+                    return prev;
+                  });
+                }
+              })
+              .catch((err) => console.warn('Supabase stock pull notice:', err));
+
+            fetchExpensesFromSupabase(currentShopId)
+              .then((remoteExpenses) => {
+                if (remoteExpenses && remoteExpenses.length > 0) {
+                  setExpenses((prev) => {
+                    const existingIds = new Set(prev.map((e) => e.id));
+                    const newItems = remoteExpenses.filter((e) => !existingIds.has(e.id));
+                    if (newItems.length > 0) {
+                      return [...newItems, ...prev];
+                    }
+                    return prev;
+                  });
+                }
+              })
+              .catch((err) => console.warn('Supabase expenses pull notice:', err));
+
+            fetchDebtsFromSupabase(currentShopId)
+              .then((remoteDebts) => {
+                if (remoteDebts && remoteDebts.length > 0) {
+                  setDebts((prev) => {
+                    const existingIds = new Set(prev.map((d) => d.id));
+                    const newItems = remoteDebts.filter((d) => !existingIds.has(d.id));
+                    if (newItems.length > 0) {
+                      return [...newItems, ...prev];
+                    }
+                    return prev;
+                  });
+                }
+              })
+              .catch((err) => console.warn('Supabase debts pull notice:', err));
           }
         })
         .catch(() => setIsSupabaseActive(false));
