@@ -217,7 +217,6 @@ export interface Transaction {
   qty: number;
   price: number;
   subtotal: number;
-  discount?: number;
   total: number;
   material: number;
   materialTotal: number;

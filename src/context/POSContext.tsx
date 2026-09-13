@@ -32,6 +32,9 @@ import {
   GeneralUnit,
   TaxRule
 } from '../types/pos';
+import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
+import { enqueueSync, processSyncQueue } from '../services/syncEngine';
+import { checkRealConnectivity } from '../services/connectivity';
 import {
   getCurrentTenantId,
   setCurrentTenantId,
@@ -50,9 +53,6 @@ import {
   syncStockToSupabase,
   syncDebtToSupabase,
   fetchTransactionsFromSupabase,
-  fetchStockFromSupabase,
-  fetchExpensesFromSupabase,
-  fetchDebtsFromSupabase,
   testSupabaseConnection,
   deleteTransactionFromSupabase
 } from '../services/supabase';
@@ -901,60 +901,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 }
               })
               .catch((err) => console.warn('Supabase remote pull notice:', err));
-
-            // Stock, expenses, and debts were previously write-only to
-            // Supabase (see syncStockToSupabase / syncExpenseToSupabase /
-            // syncDebtToSupabase below) - nothing ever read them back, so
-            // a second device or a cleared browser would show empty/stale
-            // data even though it was safely stored in the cloud. Pull
-            // and merge them the same additive, non-destructive way
-            // transactions already work above: cloud items not already
-            // present locally (by id) get added; existing local items are
-            // left untouched so any in-progress local edits aren't clobbered.
-            fetchStockFromSupabase(currentShopId)
-              .then((remoteStock) => {
-                if (remoteStock && remoteStock.length > 0) {
-                  setStock((prev) => {
-                    const existingIds = new Set(prev.map((s) => s.id || s.name));
-                    const newItems = remoteStock.filter((s) => !existingIds.has(s.id || s.name));
-                    if (newItems.length > 0) {
-                      return [...prev, ...newItems];
-                    }
-                    return prev;
-                  });
-                }
-              })
-              .catch((err) => console.warn('Supabase stock pull notice:', err));
-
-            fetchExpensesFromSupabase(currentShopId)
-              .then((remoteExpenses) => {
-                if (remoteExpenses && remoteExpenses.length > 0) {
-                  setExpenses((prev) => {
-                    const existingIds = new Set(prev.map((e) => e.id));
-                    const newItems = remoteExpenses.filter((e) => !existingIds.has(e.id));
-                    if (newItems.length > 0) {
-                      return [...newItems, ...prev];
-                    }
-                    return prev;
-                  });
-                }
-              })
-              .catch((err) => console.warn('Supabase expenses pull notice:', err));
-
-            fetchDebtsFromSupabase(currentShopId)
-              .then((remoteDebts) => {
-                if (remoteDebts && remoteDebts.length > 0) {
-                  setDebts((prev) => {
-                    const existingIds = new Set(prev.map((d) => d.id));
-                    const newItems = remoteDebts.filter((d) => !existingIds.has(d.id));
-                    if (newItems.length > 0) {
-                      return [...newItems, ...prev];
-                    }
-                    return prev;
-                  });
-                }
-              })
-              .catch((err) => console.warn('Supabase debts pull notice:', err));
           }
         })
         .catch(() => setIsSupabaseActive(false));
@@ -1843,6 +1789,47 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Transactions (Cyber POS)
+  /**
+   * Writes a completed sale into the offline queue in the background.
+   * Deliberately fire-and-forget and wrapped in try/catch: the cashier's
+   * sale is already recorded in the existing local state/localStorage
+   * flow above regardless of what happens here, so a storage or network
+   * hiccup in this layer must never surface as an error to the cashier
+   * or block the receipt from opening.
+   */
+  const queueSaleForSync = useCallback((tx: Transaction) => {
+    (async () => {
+      try {
+        const localId = generateLocalId();
+        const deviceId = await getDeviceId();
+        const now = new Date().toISOString();
+        await offlineDb.sales.add({
+          localId,
+          shopId: currentShopId,
+          userId: currentUser?.name,
+          deviceId,
+          createdAt: now,
+          updatedAt: now,
+          syncStatus: 'pending',
+          receipt: tx.receipt,
+          payload: tx as unknown as Record<string, unknown>,
+        });
+        await enqueueSync('sale', localId, 'CREATE');
+
+        const online = await checkRealConnectivity();
+        if (online) {
+          processSyncQueue().catch(() => {
+            // Swallowed deliberately - the queue entry remains 'pending'
+            // and will be retried by the backoff schedule / next Sync Now.
+          });
+        }
+      } catch {
+        // Same reasoning as above - never let offline-queueing errors
+        // reach the cashier. The sale itself already succeeded locally.
+      }
+    })();
+  }, [currentShopId, currentUser]);
+
   const recordCyberSale = (saleData: Omit<Transaction, 'id' | 'receipt' | 'date' | 'staff' | 'shopId'>): Transaction => {
     const receiptNum = `MJRC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(transactions.length + 1).padStart(5, '0')}`;
     const newTx: Transaction = {
@@ -1856,6 +1843,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setTransactions((prev) => [newTx, ...prev]);
+    queueSaleForSync(newTx);
 
     // Update or add customer record
     if (newTx.phone) {

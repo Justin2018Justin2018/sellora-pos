@@ -51,6 +51,17 @@ export const getSupabase = (): SupabaseClient | null => {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
+          detectSessionInUrl: true,
+          // Implicit flow (not PKCE): PKCE requires the confirmation
+          // link to be opened in the exact same browser/tab that
+          // started sign-up, storing a code verifier locally. On
+          // mobile, email apps very often open links in a different
+          // in-app browser/WebView, silently breaking that match and
+          // leaving the account stuck "unconfirmed" even after the
+          // link is clicked. Implicit flow puts the token directly in
+          // the redirect URL instead, so confirmation works regardless
+          // of which browser context opens the link.
+          flowType: 'implicit',
         },
       });
     } catch (err) {
@@ -104,7 +115,11 @@ export const signUpShopAccount = async (
   const client = getSupabase();
   if (!client) return { success: false, message: 'Supabase is not configured.' };
 
-  const { data, error } = await client.auth.signUp({ email, password });
+  const { data, error } = await client.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: window.location.origin },
+  });
   if (error) return { success: false, message: error.message };
   const userId = data.user?.id;
   if (!userId) {
@@ -133,6 +148,25 @@ export const signUpShopAccount = async (
   }
 
   return { success: true, message: 'Account created and linked to your shop.', userId };
+};
+
+/**
+ * Requests a fresh confirmation email for an account that signed up but
+ * hasn't confirmed yet. Uses the same redirect handling as sign-up so a
+ * resent link behaves identically to the original one.
+ */
+export const resendConfirmationEmail = async (email: string): Promise<SupabaseAuthResult> => {
+  const client = getSupabase();
+  if (!client) return { success: false, message: 'Supabase is not configured.' };
+
+  const { error } = await client.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: window.location.origin },
+  });
+
+  if (error) return { success: false, message: error.message };
+  return { success: true, message: 'Confirmation email sent. Please check your inbox (and spam folder).' };
 };
 
 /** Signs in an existing shop account. */
@@ -285,7 +319,6 @@ export const syncTransactionToSupabase = async (
       qty: tx.qty,
       unit_price: tx.price,
       total: tx.total,
-      discount: tx.discount || 0,
       payment: tx.payment,
       status: tx.status || 'completed',
       staff: tx.staff,
@@ -436,7 +469,6 @@ export const fetchTransactionsFromSupabase = async (
       qty: Number(row.qty),
       price: Number(row.unit_price),
       subtotal: Number(row.total),
-      discount: Number(row.discount || 0),
       total: Number(row.total),
       material: 0,
       materialTotal: Number(row.material_cost || 0),
@@ -474,116 +506,3 @@ export const deleteTransactionFromSupabase = async (id: number): Promise<boolean
   }
 };
 
-/**
- * Pull stock items from Supabase.
- *
- * Previously stock only ever synced ONE way (local -> cloud via
- * syncStockToSupabase). There was no matching read-back, so a second
- * device or a cleared browser would never see stock that was already
- * safely stored in Supabase. This closes that gap.
- */
-export const fetchStockFromSupabase = async (
-  shopId?: string
-): Promise<StockItem[] | null> => {
-  const client = getSupabase();
-  if (!client) return null;
-
-  try {
-    let query = client.from('pos_stock').select('*').order('name', { ascending: true });
-    if (shopId) {
-      query = query.eq('shop_id', shopId);
-    }
-    const { data, error } = await query;
-    if (error || !data) {
-      return null;
-    }
-
-    return data.map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      category: row.category || undefined,
-      unit: row.unit,
-      costPrice: Number(row.unit_cost || 0),
-      sellingPrice: Number(row.retail_price || 0),
-      openingStock: Number(row.opening_stock || 0),
-      stockAdded: Number(row.stock_added || 0),
-      reorderLevel: Number(row.reorder_level || 5),
-    }));
-  } catch (err) {
-    console.warn('Error fetching stock from Supabase:', err);
-    return null;
-  }
-};
-
-/**
- * Pull expenses from Supabase. See fetchStockFromSupabase for why this
- * exists - syncExpenseToSupabase was write-only before this.
- */
-export const fetchExpensesFromSupabase = async (
-  shopId?: string
-): Promise<Expense[] | null> => {
-  const client = getSupabase();
-  if (!client) return null;
-
-  try {
-    let query = client.from('pos_expenses').select('*').order('date', { ascending: false });
-    if (shopId) {
-      query = query.eq('shop_id', shopId);
-    }
-    const { data, error } = await query;
-    if (error || !data) {
-      return null;
-    }
-
-    return data.map((row: any) => ({
-      id: Number(row.id),
-      date: row.date,
-      desc: row.title,
-      amount: Number(row.amount || 0),
-      category: row.category || undefined,
-      payment: row.payment_method || undefined,
-      staff: row.recorded_by || undefined,
-    }));
-  } catch (err) {
-    console.warn('Error fetching expenses from Supabase:', err);
-    return null;
-  }
-};
-
-/**
- * Pull debts from Supabase. See fetchStockFromSupabase for why this
- * exists - syncDebtToSupabase was write-only before this.
- */
-export const fetchDebtsFromSupabase = async (
-  shopId?: string
-): Promise<DebtRecord[] | null> => {
-  const client = getSupabase();
-  if (!client) return null;
-
-  try {
-    let query = client.from('pos_debts').select('*').order('date', { ascending: false });
-    if (shopId) {
-      query = query.eq('shop_id', shopId);
-    }
-    const { data, error } = await query;
-    if (error || !data) {
-      return null;
-    }
-
-    return data.map((row: any) => ({
-      id: Number(row.id),
-      date: row.date,
-      name: row.customer_name,
-      phone: row.customer_phone || undefined,
-      reason: row.service || '',
-      service: row.service || '',
-      qty: 1,
-      original: Number(row.original || 0),
-      paid: Number(row.paid || 0),
-      staff: row.staff || undefined,
-    }));
-  } catch (err) {
-    console.warn('Error fetching debts from Supabase:', err);
-    return null;
-  }
-};
