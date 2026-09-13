@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { POSProvider, usePOS } from './context/POSContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthGate } from './components/auth/AuthGate';
-import { SyncStatusWidget } from './components/common/SyncStatusWidget';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { TabKey } from './components/layout/Navigation';
@@ -395,9 +394,6 @@ const MainApp: React.FC = () => {
 
       {/* Toast Notification Container */}
       <ToastContainer />
-
-      {/* Offline/Sync Status - see services/offlineDb.ts, connectivity.ts, syncEngine.ts */}
-      <SyncStatusWidget />
     </div>
   );
 };

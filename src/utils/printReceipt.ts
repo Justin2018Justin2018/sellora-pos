@@ -297,7 +297,7 @@ export function generateReceiptHtml({
     ${(transaction.discount || 0) > 0 ? `
     <div class="row" style="font-size: 9px;">
       <span>Discount:</span>
-      <span>-${formatMoney(transaction.discount)}</span>
+      <span>-${formatMoney(transaction.discount || 0)}</span>
     </div>
     ` : ''}
     <div class="row">
@@ -415,7 +415,7 @@ export function generateReceiptHtml({
     ${(transaction.discount || 0) > 0 ? `
     <div class="row" style="font-size: 11px;">
       <span>Discount:</span>
-      <span>-${formatMoney(transaction.discount)}</span>
+      <span>-${formatMoney(transaction.discount || 0)}</span>
     </div>
     ` : ''}
     <div class="row" style="font-size: 11px;">
@@ -647,7 +647,7 @@ export function generateReceiptHtml({
       ${(transaction.discount || 0) > 0 ? `
       <div class="payment-row">
         <span>Discount:</span>
-        <span style="font-family: monospace; color: #be123c;">-${formatMoney(transaction.discount)}</span>
+        <span style="font-family: monospace; color: #be123c;">-${formatMoney(transaction.discount || 0)}</span>
       </div>
       ` : ''}
       <div class="payment-row">
