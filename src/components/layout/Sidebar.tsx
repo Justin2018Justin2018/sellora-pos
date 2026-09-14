@@ -155,12 +155,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ];
     }
 
-    // `all` is a subscription bundle, NOT an operating mode. A customer
-    // who owns every business still operates one business at a time through
-    // the Business Switcher. Keeping `all` out of the navigation prevents a
-    // stale/forged client state from ever turning the UI into a cross-business
-    // aggregate view.
-    if (businessMode === 'all') return [];
+    if (businessMode === 'all') {
+      return [
+        { key: 'dashboard', label: 'Multi-Business Overview', icon: LayoutDashboard },
+        { key: 'sale', label: 'Universal POS Console', icon: ShoppingCart },
+        { key: 'services', label: 'Cyber Services', icon: Wrench },
+        { key: 'gas', label: 'Gas Station Hub', icon: Fuel },
+        { key: 'electronics', label: 'Tech & Electronics', icon: Smartphone },
+        { key: 'general_products', label: 'Retail Products', icon: Boxes },
+        {
+          key: 'stock',
+          label: 'Stock / Inventory',
+          icon: Boxes,
+          badge: lowStockItems.length > 0 ? lowStockItems.length : undefined,
+          badgeColor: 'bg-rose-500 text-white',
+        },
+        { key: 'general_purchases', label: 'Stock Purchases', icon: Truck },
+        { key: 'general_categories', label: 'Categories', icon: FolderTree },
+        { key: 'general_suppliers', label: 'Suppliers', icon: Building2 },
+        {
+          key: 'debts',
+          label: 'Customer Debts',
+          icon: CreditCard,
+          badge: outstandingDebtsCount > 0 ? outstandingDebtsCount : undefined,
+          badgeColor: 'bg-amber-500 text-white',
+        },
+        { key: 'expenses', label: 'Expenses Tracker', icon: Receipt },
+        { key: 'transactions', label: 'Sales History', icon: ReceiptText },
+        { key: 'reports', label: 'Reports Centre', icon: BarChart3 },
+        { key: 'general_profit', label: 'Profit Analysis', icon: TrendingUp },
+        { key: 'customers', label: 'Customers CRM', icon: Users },
+        { key: 'advertising', label: 'SMS Campaigns', icon: Megaphone },
+        { key: 'family', label: 'Family Finance', icon: HeartHandshake },
+        { key: 'staff', label: 'Staff Audit', icon: UserCog },
+        { key: 'ai', label: 'Sellora AI', icon: Bot },
+        { key: 'settings', label: 'Settings & Plan', icon: Settings },
+      ];
+    }
 
     // Default for General Shop, Clothing, Restaurant, Pharmacy, Other
     return [

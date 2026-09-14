@@ -47,100 +47,31 @@ CREATE TABLE IF NOT EXISTS business_subscriptions (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL,
     business_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    status TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, EXPIRED, CANCELLED
     plan TEXT NOT NULL DEFAULT 'STANDARD',
     billing_cycle TEXT NOT NULL DEFAULT 'monthly',
     start_date DATE NOT NULL DEFAULT CURRENT_DATE,
     expiry_date DATE NOT NULL,
     cancelled_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (shop_id, business_type),
-    CONSTRAINT business_subscriptions_type_chk CHECK (business_type IN (
-      'cyber','gas','electronics','general_shop','clothing','restaurant','pharmacy','other','all'
-    )),
-    CONSTRAINT business_subscriptions_status_chk CHECK (status IN ('ACTIVE','EXPIRED','CANCELLED'))
+    -- A shop can only have ONE row per business type - subscribing
+    -- again renews/reactivates the same row instead of duplicating it.
+    UNIQUE (shop_id, business_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_biz_subs_shop ON business_subscriptions(shop_id);
 CREATE INDEX IF NOT EXISTS idx_biz_subs_status ON business_subscriptions(status);
-CREATE INDEX IF NOT EXISTS idx_biz_subs_shop_type ON business_subscriptions(shop_id, business_type);
-
--- Migrate the old one-business-per-tenant entitlement into the new
--- per-business table for every existing tenant. This is intentionally
--- done in SQL so it still works after the stricter RLS below prevents
--- customers from manufacturing ACTIVE rows from the browser.
-INSERT INTO business_subscriptions (
-  id, shop_id, business_type, status, plan, billing_cycle, start_date, expiry_date, created_at
-)
-SELECT
-  'legacy_' || s.id || '_' || COALESCE(s.business_type, 'cyber'),
-  s.id,
-  COALESCE(s.business_type, 'cyber'),
-  CASE
-    WHEN s.status IN ('SUSPENDED','TERMINATED') THEN 'CANCELLED'
-    WHEN s.expiry_date < CURRENT_DATE THEN 'EXPIRED'
-    ELSE 'ACTIVE'
-  END,
-  COALESCE(s.plan, 'STANDARD'),
-  'monthly',
-  COALESCE(s.start_date, CURRENT_DATE),
-  COALESCE(s.expiry_date, CURRENT_DATE),
-  COALESCE(s.created_at, NOW())
-FROM saas_tenants s
-WHERE COALESCE(s.business_type, 'cyber') IN (
-  'cyber','gas','electronics','general_shop','clothing','restaurant','pharmacy','other','all'
-)
-ON CONFLICT (shop_id, business_type) DO NOTHING;
 
 ALTER TABLE business_subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Customers may READ only their own subscription rows. They may NOT
--- insert/update/delete ACTIVE entitlements from the browser. Activation
--- and cancellation must come from the trusted payment/backend or a
--- super-admin. This prevents a forged REST/JS request from buying access
--- without payment.
 DROP POLICY IF EXISTS "Shop members manage their own business subscriptions" ON business_subscriptions;
-DROP POLICY IF EXISTS "Shop members can view own business subscriptions" ON business_subscriptions;
-CREATE POLICY "Shop members can view own business subscriptions" ON business_subscriptions
-    FOR SELECT TO authenticated
-    USING (shop_id IN (SELECT shop_id FROM shop_members WHERE user_id = auth.uid()));
+CREATE POLICY "Shop members manage their own business subscriptions" ON business_subscriptions
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT shop_id FROM shop_members WHERE user_id = auth.uid()))
+    WITH CHECK (shop_id IN (SELECT shop_id FROM shop_members WHERE user_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Super admins manage all business subscriptions" ON business_subscriptions;
 CREATE POLICY "Super admins manage all business subscriptions" ON business_subscriptions
-    FOR ALL TO authenticated
-    USING (EXISTS (SELECT 1 FROM super_admins WHERE user_id = auth.uid()))
-    WITH CHECK (EXISTS (SELECT 1 FROM super_admins WHERE user_id = auth.uid()));
-
--- Customer requests are separate from entitlements. A request never
--- grants access by itself. Your trusted payment webhook/admin process
--- approves it by creating/updating business_subscriptions.
-CREATE TABLE IF NOT EXISTS business_subscription_requests (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    shop_id TEXT NOT NULL,
-    business_type TEXT NOT NULL CHECK (business_type IN (
-      'cyber','gas','electronics','general_shop','clothing','restaurant','pharmacy','other'
-    )),
-    plan TEXT NOT NULL DEFAULT 'STANDARD',
-    billing_cycle TEXT NOT NULL DEFAULT 'monthly',
-    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED','CANCELLED')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    resolved_at TIMESTAMPTZ,
-    CONSTRAINT business_subscription_requests_shop_fk
-      FOREIGN KEY (shop_id) REFERENCES saas_tenants(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_biz_sub_requests_shop ON business_subscription_requests(shop_id, created_at DESC);
-ALTER TABLE business_subscription_requests ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Shop members create subscription requests" ON business_subscription_requests;
-CREATE POLICY "Shop members create subscription requests" ON business_subscription_requests
-    FOR INSERT TO authenticated
-    WITH CHECK (shop_id IN (SELECT shop_id FROM shop_members WHERE user_id = auth.uid()));
-DROP POLICY IF EXISTS "Shop members view subscription requests" ON business_subscription_requests;
-CREATE POLICY "Shop members view subscription requests" ON business_subscription_requests
-    FOR SELECT TO authenticated
-    USING (shop_id IN (SELECT shop_id FROM shop_members WHERE user_id = auth.uid()));
-DROP POLICY IF EXISTS "Super admins manage subscription requests" ON business_subscription_requests;
-CREATE POLICY "Super admins manage subscription requests" ON business_subscription_requests
     FOR ALL TO authenticated
     USING (EXISTS (SELECT 1 FROM super_admins WHERE user_id = auth.uid()))
     WITH CHECK (EXISTS (SELECT 1 FROM super_admins WHERE user_id = auth.uid()));
@@ -302,10 +233,13 @@ CREATE POLICY "Members can access their shop's subscribed business customers" ON
 --      and migrateLegacyBusinessType() in the app creates a matching
 --      ACTIVE business_subscriptions row the first time each shop
 --      loads post-upgrade, so nobody is locked out.
---   2. Customers request additional businesses through
---      business_subscription_requests. ONLY the trusted payment/backend
---      or a super admin creates/updates the ACTIVE entitlement row.
---      Never expose a client-side INSERT/UPDATE path for ACTIVE rows.
+--   2. New businesses are activated by calling, from the signed-in
+--      shop's own account:
+--        insert into business_subscriptions
+--          (id, shop_id, business_type, status, plan, billing_cycle, start_date, expiry_date)
+--        values (...)
+--      (the app's "Subscribe to another business" flow does this via
+--      businessSubscriptionService.subscribeBusinessType()).
 --   3. To immediately cut off a business (e.g. non-payment), a super
 --      admin can update that row's status to 'EXPIRED' or 'CANCELLED'
 --      - access to that business's data is revoked on the very next

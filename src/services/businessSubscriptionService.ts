@@ -14,9 +14,10 @@ import { logSubscriptionAudit } from './saasService';
  * Local-first, same pattern as saasService.ts / tenantService.ts:
  *   - Reads/writes localStorage immediately so the app works fully
  *     offline.
- *   - When Supabase is configured, the browser may READ its own
- *     entitlements, but it cannot manufacture ACTIVE subscription rows.
- *     Activation is trusted-payment/backend or super-admin controlled.
+ *   - Best-effort pushes to the `business_subscriptions` Supabase
+ *     table when configured. RLS on that table (see
+ *     supabase-schema-v4-business-isolation.sql) only allows a shop's
+ *     own members to read/write ITS OWN rows - never another shop's.
  *   - RLS on the actual data tables (pos_transactions, pos_stock,
  *     pos_expenses, pos_debts, pos_customers) additionally requires
  *     an ACTIVE, unexpired row here for the row's business_type. That
@@ -140,14 +141,7 @@ export const subscribeBusinessType = (
   }
 
   saveBusinessSubscriptions(tenantId, subs);
-  // IMPORTANT: when Supabase is configured, a browser must never be able
-  // to manufacture an ACTIVE subscription by writing directly to the
-  // subscription table. The authoritative activation path is a trusted
-  // server/super-admin/payment webhook. Keep this local write only for
-  // offline/demo deployments where there is no remote database.
-  if (!isSupabaseConfigured()) {
-    void pushBusinessSubscriptionToDb(result);
-  }
+  pushBusinessSubscriptionToDb(result);
 
   logSubscriptionAudit({
     action: existingIdx >= 0 ? 'SUBSCRIPTION_RENEWED' : 'SUBSCRIPTION_CHANGED',
@@ -231,38 +225,6 @@ export const migrateLegacyBusinessType = (
 // -------------------------------------------------------------
 // Cloud sync (Supabase) - best-effort, never blocks the UI.
 // -------------------------------------------------------------
-/**
- * Requests an additional business from the signed-in customer. A request
- * is NOT an access grant. When Supabase is configured, the customer can
- * submit the request, but only the trusted billing/payment path can turn
- * it into an ACTIVE business_subscriptions row.
- */
-export const requestAdditionalBusiness = async (
-  tenantId: string,
-  businessType: BusinessMode,
-  plan: SubscriptionPlan,
-  billingCycle: 'monthly' | 'annual'
-): Promise<{ success: boolean; message: string }> => {
-  if (!isSupabaseConfigured()) {
-    return { success: true, message: 'Offline/demo mode: subscription request recorded locally.' };
-  }
-  const client = getSupabase();
-  if (!client) return { success: false, message: 'Supabase is not configured.' };
-  try {
-    const { error } = await client.from('business_subscription_requests').insert({
-      shop_id: tenantId,
-      business_type: businessType,
-      plan,
-      billing_cycle: billingCycle,
-      status: 'PENDING',
-    });
-    if (error) return { success: false, message: error.message };
-    return { success: true, message: 'Subscription request submitted. Access will be enabled after payment is confirmed.' };
-  } catch (err: any) {
-    return { success: false, message: err?.message || 'Could not submit subscription request.' };
-  }
-};
-
 
 const toDbRow = (s: BusinessSubscription) => ({
   id: s.id,

@@ -23,7 +23,6 @@ import {
   saveSaaSPlans,
   logoutSuperAdmin,
   getSuperAdminSession,
-  createSuperAdminLocalSession,
   setCurrentTenantId,
   checkSuperAdminAccess,
   loginOrSetupSuperAdminPin,
@@ -151,13 +150,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       if (!cancelled) {
         setAccessCheck(result);
         setCheckingAccess(false);
-        // AuthContext has already verified this account against the
-        // Supabase super_admins table. No additional PIN is required for
-        // platform-owner entry; establish the local UI session immediately.
-        if (result.isAdmin) {
-          createSuperAdminLocalSession();
-          setSession(getSuperAdminSession());
-        }
       }
     });
     return () => {

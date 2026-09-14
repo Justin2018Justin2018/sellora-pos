@@ -1,10 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { BUSINESS_TYPES, BusinessTypeConfig, getBusinessTypeConfig, getBusinessTypes } from '../../data/businessTypes';
 import { BusinessMode, SubscriptionPlan } from '../../types/pos';
 import { createTenant, updateTenant } from '../../services/saasService';
-import { isSupabaseConfigured } from '../../services/supabase';
-import { requestAdditionalBusiness } from '../../services/businessSubscriptionService';
 import {
   X,
   CheckCircle2,
@@ -50,10 +48,7 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
   } = usePOS();
 
   const [selectedType, setSelectedType] = useState<BusinessMode>(
-    initialType ||
-      (mode === 'change_type'
-        ? (BUSINESS_TYPES.find((b) => !activeBusinessTypes.includes(b.id))?.id || businessMode)
-        : 'cyber')
+    initialType || (mode === 'change_type' ? businessMode : 'cyber')
   );
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [step, setStep] = useState<'choose_type' | 'details' | 'payment'>('choose_type');
@@ -90,17 +85,6 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
   const alreadySubscribed = isBusinessSubscribed(selectedType);
   const isCurrentActiveSelection = mode === 'change_type' && businessMode === selectedType;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (initialType) {
-      setSelectedType(initialType);
-      return;
-    }
-    if (mode === 'change_type') {
-      setSelectedType(BUSINESS_TYPES.find((b) => !activeBusinessTypes.includes(b.id))?.id || businessMode);
-    }
-  }, [isOpen, initialType, mode, activeBusinessTypes, businessMode]);
-
   // Handle activating (or renewing) a business for the current tenant.
   // This is additive - it never removes access to any business the
   // tenant already has. Existing businesses keep working exactly as
@@ -109,35 +93,8 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
   // it. See businessSubscriptionService.subscribeBusinessType and
   // supabase-schema-v4-business-isolation.sql for the real enforcement
   // behind this - this button is the self-service checkout for it.
-  const handleApplyChange = async () => {
+  const handleApplyChange = () => {
     setIsSubmitting(true);
-
-    // With Supabase enabled, an ACTIVE subscription is a server-side
-    // entitlement and cannot be created by a browser. Submit a request
-    // instead; payment confirmation/backend or a super admin activates it.
-    if (isSupabaseConfigured() && currentTenant?.id) {
-      const result = await requestAdditionalBusiness(
-        currentTenant.id,
-        selectedType,
-        planForType,
-        billingCycle
-      );
-      setIsSubmitting(false);
-      if (!result.success) {
-        addToast({ title: 'Subscription Request Failed', message: result.message, type: 'error' });
-        return;
-      }
-      addToast({
-        title: 'Subscription Request Submitted',
-        message: `${activeConfig.shortName} will become available only after payment is confirmed and the subscription is activated. Your existing businesses are unchanged.`,
-        type: 'success',
-      });
-      onClose();
-      return;
-    }
-
-    // Local/demo deployments retain the existing immediate activation
-    // behavior because there is no remote entitlement service.
     setTimeout(() => {
       subscribeToBusinessType(selectedType, planForType, billingCycle);
       setBusinessMode(selectedType);
