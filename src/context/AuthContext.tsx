@@ -7,7 +7,7 @@ import {
   signOutSupabaseUser,
 } from '../services/supabase';
 import { ensureTenantForShop, syncTenantsFromCloudIfAuthorized } from '../services/saasService';
-import { fetchOwnTenantFromDb } from '../services/tenantService';
+import { fetchOwnTenantFromDb, isCurrentUserSuperAdminInDb } from '../services/tenantService';
 import { fetchBusinessSubscriptionsFromDb } from '../services/businessSubscriptionService';
 import { TenantAccount, BusinessSubscription } from '../types/pos';
 
@@ -36,6 +36,8 @@ interface AuthState {
    * It can't be edited from devtools the way localStorage can.
    */
   dbBusinessSubscriptions: BusinessSubscription[] | null;
+  /** True when the authenticated Supabase account is a platform Super Admin. */
+  isPlatformSuperAdmin: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -51,6 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRole] = useState<string | null>(null);
   const [dbTenant, setDbTenant] = useState<TenantAccount | null>(null);
   const [dbBusinessSubscriptions, setDbBusinessSubscriptions] = useState<BusinessSubscription[] | null>(null);
+  const [isPlatformSuperAdmin, setIsPlatformSuperAdmin] = useState(false);
 
   const resolveSession = useCallback(async () => {
     if (!configured) {
@@ -67,10 +70,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setRole(null);
         setDbTenant(null);
         setDbBusinessSubscriptions(null);
+        setIsPlatformSuperAdmin(false);
         return;
       }
       setUserId(user.id);
       setUserEmail(user.email ?? null);
+
+      // Super Admin is an account-level privilege, independent of tenant
+      // membership or business subscriptions. Resolve it immediately after
+      // Supabase authentication so the platform owner lands in the console.
+      const platformAdmin = await isCurrentUserSuperAdminInDb();
+      setIsPlatformSuperAdmin(platformAdmin);
 
       const membership = await getMyShopMembership();
       if (membership) {
@@ -97,7 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // If this user is a real platform super admin, pull the full
         // tenant registry into local storage now, before the Super Admin
         // dashboard could possibly be opened.
-        await syncTenantsFromCloudIfAuthorized();
+        if (platformAdmin) await syncTenantsFromCloudIfAuthorized();
       } else {
         setShopId(null);
         setRole(null);
@@ -131,6 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRole(null);
     setDbTenant(null);
     setDbBusinessSubscriptions(null);
+    setIsPlatformSuperAdmin(false);
   }, []);
 
   return (
@@ -144,6 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         dbTenant,
         dbBusinessSubscriptions,
+        isPlatformSuperAdmin,
         refresh: resolveSession,
         signOut,
       }}

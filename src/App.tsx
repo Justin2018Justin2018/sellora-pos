@@ -88,7 +88,7 @@ const MainApp: React.FC = () => {
     setIsSuperAdmin,
     refreshSubscriptionStatus,
   } = usePOS();
-  const { configured: authConfigured, userEmail, dbTenant, signOut } = useAuth();
+  const { configured: authConfigured, userEmail, dbTenant, isPlatformSuperAdmin, loading: authLoading, signOut } = useAuth();
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [selectedReceipt, setSelectedReceipt] = useState<Transaction | null>(null);
@@ -110,6 +110,19 @@ const MainApp: React.FC = () => {
   useEffect(() => {
     setActiveTab('dashboard');
   }, [businessMode]);
+
+  // Platform Super Admin accounts bypass tenant/business subscription UI.
+  // Once Supabase confirms the account-level super_admins row, immediately
+  // open the Super Admin console after login (no PIN gate, no tenant needed).
+  useEffect(() => {
+    if (!authLoading && isPlatformSuperAdmin) {
+      setIsSuperAdmin(true);
+      setIsSuperAdminOpen(true);
+    } else if (!isPlatformSuperAdmin) {
+      setIsSuperAdmin(false);
+      setIsSuperAdminOpen(false);
+    }
+  }, [authLoading, isPlatformSuperAdmin, setIsSuperAdmin]);
 
   // Check if first time setup is needed
   useEffect(() => {

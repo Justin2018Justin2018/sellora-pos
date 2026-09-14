@@ -791,7 +791,7 @@ export const changeSuperAdminPin = async (newPin: string, confirmPin: string): P
   return ok ? { success: true, message: 'PIN updated.' } : { success: false, message: 'Could not update PIN.' };
 };
 
-const createSuperAdminLocalSession = (): void => {
+export const createSuperAdminLocalSession = (): void => {
   const session: SuperAdminSession = {
     username: 'superadmin',
     name: 'Platform Owner',
