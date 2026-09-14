@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { useAuth } from './AuthContext';
 import {
   BusinessMode,
   BusinessProfile,
@@ -305,6 +306,8 @@ function safeStorageGet<T>(key: string, fallback: T): T {
 }
 
 export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { configured: authConfigured, dbBusinessSubscriptions } = useAuth();
+
   // SaaS Multi-Tenancy & Subscriptions State
   const [currentTenantIdState, setCurrentTenantIdState] = useState<string>(() => getCurrentTenantId());
   const [currentTenant, setCurrentTenant] = useState<TenantAccount>(() => getCurrentTenant());
@@ -388,9 +391,28 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const activeBusinessTypes = useMemo<BusinessMode[]>(() => {
+    // When Supabase authentication is configured, the database snapshot
+    // is authoritative. Never fall back to localStorage while the remote
+    // subscription list is still loading: doing so would let an edited
+    // browser cache temporarily grant a business that is not actually paid.
+    if (authConfigured && dbBusinessSubscriptions !== null) {
+      const today = new Date();
+      const isActive = (s: BusinessSubscription) => {
+        if (s.status !== 'ACTIVE') return false;
+        if (!s.expiryDate) return true;
+        const expiry = new Date(`${s.expiryDate}T23:59:59`);
+        return expiry.getTime() >= today.getTime();
+      };
+      const active = dbBusinessSubscriptions.filter(isActive);
+      if (active.some((s) => s.businessType === 'all')) {
+        return ['cyber', 'gas', 'electronics', 'general_shop', 'clothing', 'restaurant', 'pharmacy', 'other'];
+      }
+      return active.map((s) => s.businessType).filter((v, i, a) => a.indexOf(v) === i);
+    }
+    if (authConfigured && dbBusinessSubscriptions === null) return [];
     const tid = getCurrentTenantId();
     return getActiveBusinessTypes(tid);
-  }, [businessSubscriptions]);
+  }, [businessSubscriptions, authConfigured, dbBusinessSubscriptions]);
 
   const isBusinessSubscribed = useCallback(
     (mode: BusinessMode) => activeBusinessTypes.includes(mode),
@@ -408,6 +430,20 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTenantIdState]);
+
+  // If a subscription expires/cancels or the remote snapshot changes,
+  // immediately force the selected business back onto a business the
+  // account is actually entitled to use. This also closes the gap where
+  // a stale URL/browser state tries to retain an unsubscribed mode.
+  useEffect(() => {
+    if (activeBusinessTypes.length === 0) return;
+    if (!activeBusinessTypes.includes(businessMode)) {
+      const next = activeBusinessTypes[0];
+      setBusinessModeState(next);
+      const tid = getCurrentTenantId();
+      localStorage.setItem(getTenantKeyStatic(tid, 'business_mode'), JSON.stringify(next));
+    }
+  }, [activeBusinessTypes]);
 
   const [businessMode, setBusinessModeState] = useState<BusinessMode>(() => {
     const tid = getCurrentTenantId();
