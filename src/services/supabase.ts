@@ -304,7 +304,8 @@ export const testSupabaseConnection = async (): Promise<{
  */
 export const syncTransactionToSupabase = async (
   tx: Transaction,
-  shopId: string
+  shopId: string,
+  businessType?: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -325,6 +326,7 @@ export const syncTransactionToSupabase = async (
       notes: tx.notes || null,
       material_cost: tx.materialTotal || 0,
       shop_id: shopId,
+      business_type: businessType || tx.businessType || 'cyber',
     });
     if (error) {
       console.warn('Failed to sync transaction to Supabase:', error.message);
@@ -342,7 +344,8 @@ export const syncTransactionToSupabase = async (
  */
 export const syncExpenseToSupabase = async (
   expense: Expense,
-  shopId: string
+  shopId: string,
+  businessType?: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -357,6 +360,7 @@ export const syncExpenseToSupabase = async (
       payment_method: expense.payment || 'Cash',
       recorded_by: expense.staff || 'Admin',
       shop_id: shopId,
+      business_type: businessType || expense.businessType || 'cyber',
     });
     if (error) {
       console.warn('Failed to sync expense to Supabase:', error.message);
@@ -374,7 +378,8 @@ export const syncExpenseToSupabase = async (
  */
 export const syncStockToSupabase = async (
   stockItems: StockItem[],
-  shopId: string
+  shopId: string,
+  businessType?: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -392,6 +397,7 @@ export const syncStockToSupabase = async (
       damaged_stock: 0,
       reorder_level: item.reorderLevel ?? 5,
       shop_id: shopId,
+      business_type: businessType || item.businessType || 'cyber',
     }));
 
     const { error } = await client.from('pos_stock').upsert(rows);
@@ -411,7 +417,8 @@ export const syncStockToSupabase = async (
  */
 export const syncDebtToSupabase = async (
   debt: DebtRecord,
-  shopId: string
+  shopId: string,
+  businessType?: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -428,6 +435,7 @@ export const syncDebtToSupabase = async (
       status: debt.original - debt.paid <= 0 ? 'paid' : 'pending',
       staff: debt.staff || 'Admin',
       shop_id: shopId,
+      business_type: businessType || debt.businessType || debt.kind || 'cyber',
     });
     if (error) {
       console.warn('Failed to sync debt to Supabase:', error.message);
@@ -441,10 +449,46 @@ export const syncDebtToSupabase = async (
 };
 
 /**
- * Pull transactions from Supabase
+ * Syncs a customer record to Supabase
+ */
+export const syncCustomerToSupabase = async (
+  customer: Customer,
+  shopId: string,
+  businessType?: string
+): Promise<boolean> => {
+  const client = getSupabase();
+  if (!client) return false;
+
+  try {
+    const { error } = await client.from('pos_customers').upsert({
+      id: customer.id || customer.phone,
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email || null,
+      notes: customer.notes || null,
+      loyalty_points: customer.points || 0,
+      shop_id: shopId,
+      business_type: businessType || customer.businessType || 'cyber',
+    });
+    if (error) {
+      console.warn('Failed to sync customer to Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error syncing customer to Supabase:', err);
+    return false;
+  }
+};
+
+/**
+ * Pull transactions from Supabase. Scoped to a single business_type
+ * when provided so switching business mode never merges another
+ * business's sales into the active one's view.
  */
 export const fetchTransactionsFromSupabase = async (
-  shopId?: string
+  shopId?: string,
+  businessType?: string
 ): Promise<Transaction[] | null> => {
   const client = getSupabase();
   if (!client) return null;
@@ -453,6 +497,9 @@ export const fetchTransactionsFromSupabase = async (
     let query = client.from('pos_transactions').select('*').order('id', { ascending: false });
     if (shopId) {
       query = query.eq('shop_id', shopId);
+    }
+    if (businessType) {
+      query = query.eq('business_type', businessType);
     }
     const { data, error } = await query;
     if (error || !data) {
@@ -479,6 +526,7 @@ export const fetchTransactionsFromSupabase = async (
       staff: row.staff,
       notes: row.notes || undefined,
       status: row.status,
+      businessType: row.business_type || undefined,
     }));
   } catch (err) {
     console.warn('Error fetching from Supabase:', err);

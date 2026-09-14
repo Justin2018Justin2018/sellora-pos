@@ -8,7 +8,8 @@ import {
 } from '../services/supabase';
 import { ensureTenantForShop, syncTenantsFromCloudIfAuthorized } from '../services/saasService';
 import { fetchOwnTenantFromDb } from '../services/tenantService';
-import { TenantAccount } from '../types/pos';
+import { fetchBusinessSubscriptionsFromDb } from '../services/businessSubscriptionService';
+import { TenantAccount, BusinessSubscription } from '../types/pos';
 
 interface AuthState {
   /** Whether this deployment has real Supabase credentials configured. */
@@ -27,6 +28,14 @@ interface AuthState {
    * tenant copy - should decide whether the app is subscription-blocked.
    */
   dbTenant: TenantAccount | null;
+  /**
+   * Authoritative list of this shop's per-business subscriptions,
+   * pulled straight from Supabase (null if not configured/linked yet).
+   * This - not the local cache - decides which businesses (Shop,
+   * Cyber, Gas, Electronics, ...) the signed-in user may switch into.
+   * It can't be edited from devtools the way localStorage can.
+   */
+  dbBusinessSubscriptions: BusinessSubscription[] | null;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -41,6 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [shopId, setShopId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [dbTenant, setDbTenant] = useState<TenantAccount | null>(null);
+  const [dbBusinessSubscriptions, setDbBusinessSubscriptions] = useState<BusinessSubscription[] | null>(null);
 
   const resolveSession = useCallback(async () => {
     if (!configured) {
@@ -56,6 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setShopId(null);
         setRole(null);
         setDbTenant(null);
+        setDbBusinessSubscriptions(null);
         return;
       }
       setUserId(user.id);
@@ -71,6 +82,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const own = await fetchOwnTenantFromDb(membership.shopId);
         setDbTenant(own);
 
+        // Authoritative list of which businesses (Shop, Cyber, Gas,
+        // Electronics, ...) this shop currently has active - same
+        // can't-be-spoofed guarantee as dbTenant above.
+        const subs = await fetchBusinessSubscriptionsFromDb(membership.shopId);
+        setDbBusinessSubscriptions(subs);
+
         // Bridge into the existing tenant-keyed local data model so every
         // existing view keeps working unchanged (see ensureTenantForShop).
         // Passing the DB record keeps business type/plan/status accurate
@@ -85,6 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setShopId(null);
         setRole(null);
         setDbTenant(null);
+        setDbBusinessSubscriptions(null);
       }
     } finally {
       setLoading(false);
@@ -112,11 +130,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setShopId(null);
     setRole(null);
     setDbTenant(null);
+    setDbBusinessSubscriptions(null);
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ configured, loading, userId, userEmail, shopId, role, dbTenant, refresh: resolveSession, signOut }}
+      value={{
+        configured,
+        loading,
+        userId,
+        userEmail,
+        shopId,
+        role,
+        dbTenant,
+        dbBusinessSubscriptions,
+        refresh: resolveSession,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>

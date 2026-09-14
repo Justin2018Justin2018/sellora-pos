@@ -34,6 +34,40 @@ export type SubscriptionStatus =
 
 export type SubscriptionPlan = 'BASIC' | 'STANDARD' | 'PREMIUM' | 'ENTERPRISE' | 'FREE' | 'PRO' | 'BUSINESS';
 
+/**
+ * ------------------------------------------------------------------
+ * Per-business subscriptions.
+ * ------------------------------------------------------------------
+ * A single tenant (shop/customer) can hold MULTIPLE independent rows
+ * here - one per BusinessMode they have paid for (e.g. one for
+ * 'cyber', another for 'gas'). This replaces the old model where a
+ * tenant had exactly one `businessType` field. That field is kept on
+ * TenantAccount for backward compatibility/display only - the real
+ * source of truth for "what can this customer access" is the set of
+ * BusinessSubscription rows with status === 'ACTIVE' and an
+ * unexpired expiryDate (see businessSubscriptionService.ts).
+ *
+ * A row with businessType === 'all' is a bundle subscription (the
+ * "All-in-One Multi-Business Suite" plan) and grants access to every
+ * concrete business type at once.
+ * ------------------------------------------------------------------
+ */
+export type BusinessSubscriptionStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
+
+export interface BusinessSubscription {
+  id: string;
+  /** The tenant/shop this subscription belongs to (== saas_tenants.id == shop_members.shop_id). */
+  tenantId: string;
+  businessType: BusinessMode;
+  status: BusinessSubscriptionStatus;
+  plan: SubscriptionPlan;
+  billingCycle: 'monthly' | 'annual';
+  startDate: string; // ISO date YYYY-MM-DD
+  expiryDate: string; // ISO date YYYY-MM-DD
+  createdAt: string;
+  cancelledAt?: string;
+}
+
 export interface TenantAccount {
   id: string;
   shopName: string;
@@ -174,6 +208,8 @@ export interface StockItem {
   qty?: number;
   reorderLevel?: number;
   supplier?: string;
+  /** Which subscribed business this stock item belongs to. */
+  businessType?: BusinessMode;
 }
 
 export interface WastageRecord {
@@ -226,6 +262,8 @@ export interface Transaction {
   payment: PaymentMethod;
   staff: string;
   shopId?: string;
+  /** Which subscribed business this sale belongs to. Used to keep Shop, Cyber, Gas, Electronics, etc. data fully isolated. */
+  businessType?: BusinessMode;
   status?: 'completed' | 'cancelled';
   stockUsed?: Array<{ name: string; qty: number }> | null;
   debtPayment?: boolean;
@@ -321,6 +359,8 @@ export interface Expense {
   payment?: PaymentMethod;
   staff?: string;
   shopId?: string;
+  /** Which subscribed business this expense belongs to. */
+  businessType?: BusinessMode;
 }
 
 export interface DebtPaymentEntry {
@@ -351,6 +391,8 @@ export interface DebtRecord {
   payments?: DebtPaymentEntry[];
   lastPaymentDate?: string;
   shopId?: string;
+  /** Which subscribed business this debt belongs to. Falls back to `kind` for legacy records. */
+  businessType?: BusinessMode;
 }
 
 export interface Customer {
@@ -366,6 +408,8 @@ export interface Customer {
   debtBalance?: number;
   visits?: number;
   points?: number;
+  /** Which subscribed business this customer record belongs to. */
+  businessType?: BusinessMode;
 }
 
 export interface Supplier {

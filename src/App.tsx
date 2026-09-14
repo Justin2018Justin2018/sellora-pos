@@ -15,9 +15,11 @@ import { SetAdminPasswordModal } from './components/common/SetAdminPasswordModal
 import { SupabaseModal } from './components/supabase/SupabaseModal';
 import { SuperAdminDashboard } from './components/admin/SuperAdminDashboard';
 import { SubscriptionBlockedScreen } from './components/subscription/SubscriptionBlockedScreen';
+import { NoActiveBusinessScreen } from './components/subscription/NoActiveBusinessScreen';
 import { SubscriptionExpiryBanner } from './components/subscription/SubscriptionExpiryBanner';
 import { BusinessTypeSelectionModal } from './components/subscription/BusinessTypeSelectionModal';
 import { computeSubscriptionStatus } from './services/saasService';
+import { getBusinessTypeConfig } from './data/businessTypes';
 
 // Views
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -78,6 +80,7 @@ const MainApp: React.FC = () => {
     profile,
     currentShop,
     businessMode,
+    activeBusinessTypes,
     isSupabaseActive,
     currentTenant,
     switchTenant,
@@ -97,6 +100,16 @@ const MainApp: React.FC = () => {
   const [isBusinessTypeModalOpen, setIsBusinessTypeModalOpen] = useState(false);
   const [initialSaleService, setInitialSaleService] = useState<string | undefined>(undefined);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Whenever the active business changes, always land back on the
+  // dashboard. Without this, a tab that only makes sense for the
+  // previous business (e.g. staying on "gas" after switching into
+  // Cyber) would keep rendering against the new businessMode's state -
+  // at best confusing, at worst showing the wrong business's view. See
+  // the tab-router guards below for the corresponding data-side fix.
+  useEffect(() => {
+    setActiveTab('dashboard');
+  }, [businessMode]);
 
   // Check if first time setup is needed
   useEffect(() => {
@@ -157,6 +170,27 @@ const MainApp: React.FC = () => {
           isOpen={isShopSwitcherOpen}
           onClose={() => setIsShopSwitcherOpen(false)}
           onOpenSuperAdmin={() => setIsSuperAdminOpen(true)}
+        />
+        <ToastContainer />
+      </>
+    );
+  }
+
+  // 3. No Active Business Guard
+  // The account itself is fine, but every business subscription has
+  // expired/been cancelled - there is nothing to switch into. Distinct
+  // from isBlocked above (whole-account suspension/expiry).
+  if (activeBusinessTypes.length === 0) {
+    return (
+      <>
+        <NoActiveBusinessScreen
+          tenant={authoritativeTenant}
+          onSubscribe={() => setIsBusinessTypeModalOpen(true)}
+          onOpenSuperAdmin={() => setIsSuperAdminOpen(true)}
+        />
+        <BusinessTypeSelectionModal
+          isOpen={isBusinessTypeModalOpen}
+          onClose={() => setIsBusinessTypeModalOpen(false)}
         />
         <ToastContainer />
       </>
@@ -246,13 +280,36 @@ const MainApp: React.FC = () => {
             )
           )}
 
-          {activeTab === 'gas' && <GasView />}
-          {activeTab === 'electronics' && <ElectronicsView onSaleCompleted={(tx) => setSelectedReceipt(tx)} />}
+          {/* Gas/Electronics render their OWN dedicated data (gasTransactions,
+              electronicsProducts, ...) regardless of what activeTab says, so
+              this must also check businessMode - otherwise a stale activeTab
+              (e.g. right after switching business, or a forced/devtools tab
+              change) could show one business's full data while a different
+              business is actually active. The activeTab-reset effect above
+              covers normal navigation; this is the render-time backstop. */}
+          {activeTab === 'gas' && businessMode === 'gas' && <GasView />}
+          {activeTab === 'electronics' && businessMode === 'electronics' && (
+            <ElectronicsView onSaleCompleted={(tx) => setSelectedReceipt(tx)} />
+          )}
 
           {activeTab === 'general_products' && <GeneralProductsView />}
 
+          {/* TransactionsView reads the cyber-only `transactions` state
+              directly, so it must not render for other businesses -
+              otherwise Gas/Electronics/Shop would show Cyber's sales.
+              Non-cyber businesses already have their own correctly
+              business-scoped sales via `generalSales` (see
+              GeneralDashboardView/GeneralProfitView) - a dedicated
+              full history list for them is a follow-up, not yet built. */}
           {activeTab === 'transactions' && (
-            <TransactionsView onOpenReceipt={(tx) => setSelectedReceipt(tx)} />
+            businessMode === 'cyber' ? (
+              <TransactionsView onOpenReceipt={(tx) => setSelectedReceipt(tx)} />
+            ) : (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-8 text-center text-sm text-slate-500 dark:text-slate-400">
+                Sales history for {getBusinessTypeConfig(businessMode).shortName} appears on its Dashboard and
+                Profit Analysis tabs.
+              </div>
+            )
           )}
 
           {activeTab === 'stock' && (
@@ -264,7 +321,7 @@ const MainApp: React.FC = () => {
           {activeTab === 'general_suppliers' && <GeneralSuppliersView />}
           {activeTab === 'general_profit' && <GeneralProfitView />}
 
-          {activeTab === 'services' && <ServicesView />}
+          {activeTab === 'services' && businessMode === 'cyber' && <ServicesView />}
 
           {activeTab === 'debts' && <DebtsView />}
 

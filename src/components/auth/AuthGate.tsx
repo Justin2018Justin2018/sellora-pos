@@ -20,11 +20,8 @@ const slugify = (value: string): string => {
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="min-h-screen w-full flex items-center justify-center bg-[#F1F5F9] px-4 py-10">
     <div className="w-full max-w-md">
-      <div className="flex items-center justify-center gap-2 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-lg">
-          S
-        </div>
-        <span className="text-xl font-bold text-slate-800">Sellora POS</span>
+      <div className="flex items-center justify-center mb-6">
+        <img src="/logo.png" alt="Sellora POS" className="h-16 w-auto" />
       </div>
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">{children}</div>
       <p className="text-center text-xs text-slate-400 mt-6">
@@ -366,9 +363,12 @@ const LinkShopScreen: React.FC = () => {
 
 const LoadingScreen: React.FC = () => (
   <div className="min-h-screen w-full flex items-center justify-center bg-[#F1F5F9]">
-    <div className="flex flex-col items-center gap-3 text-slate-500">
-      <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-      <span className="text-sm font-medium">Loading Sellora POS…</span>
+    <div className="flex flex-col items-center gap-4 text-slate-500">
+      <img src="/logo.png" alt="Sellora POS" className="h-14 w-auto" />
+      <div className="flex items-center gap-2">
+        <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+        <span className="text-sm font-medium">Loading Sellora POS…</span>
+      </div>
     </div>
   </div>
 );
