@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import {
   TenantAccount,
   SubscriptionPlan,
@@ -80,6 +81,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   onExitAdmin,
   onSelectShopToView,
 }) => {
+  const { userEmail } = useAuth();
   const [tenants, setTenants] = useState<TenantAccount[]>(() => getTenants());
   const [auditLog, setAuditLog] = useState<SubscriptionAuditEntry[]>(() => getSubscriptionAuditLog());
   const [plans, setPlans] = useState<SubscriptionPlanConfig[]>(() => getSaaSPlans());
@@ -165,6 +167,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     if (result.success) {
       setSession(getSuperAdminSession());
       refreshData();
+    } else if (result.notAnAdmin) {
+      // The mount-time check said this account WAS an admin, but the
+      // fresh check just now says it isn't (session changed under us,
+      // wrong Supabase project, or a transient RLS/network hiccup).
+      // Re-sync accessCheck to the true current state instead of
+      // leaving the "choose a PIN" form up alongside a contradictory
+      // error - that combination is confusing and makes the bug look
+      // worse than it is.
+      setAccessCheck({ isAdmin: false, hasPinSet: false });
+      setLoginError('');
     } else {
       setLoginError(result.message);
     }
@@ -370,6 +382,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 real row in the <code className="bg-slate-800 px-1 py-0.5 rounded">super_admins</code> table can
                 access this dashboard - ask the platform owner to add you.
               </p>
+              {userEmail && (
+                <p className="text-rose-300/60 text-[11px] leading-relaxed pt-1 border-t border-rose-900/50">
+                  Checked account: <span className="font-mono">{userEmail}</span>. If this isn't the account you
+                  expected, sign out and back in as the right one, and double-check this deployment's Supabase
+                  project matches the one where that account was added to <code>super_admins</code>.
+                </p>
+              )}
             </div>
           ) : (
             <form onSubmit={handleAdminLogin} className="space-y-4">
