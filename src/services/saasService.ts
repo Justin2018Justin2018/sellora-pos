@@ -5,7 +5,7 @@ import {
   SubscriptionPlanConfig,
   SubscriptionAuditEntry,
 } from '../types/pos';
-import { isSupabaseConfigured } from './supabase';
+import { isSupabaseConfigured, getSupabase } from './supabase';
 import {
   isCurrentUserSuperAdminInDb,
   pullTenantsFromDb,
@@ -791,14 +791,51 @@ export const changeSuperAdminPin = async (newPin: string, confirmPin: string): P
   return ok ? { success: true, message: 'PIN updated.' } : { success: false, message: 'Could not update PIN.' };
 };
 
-const createSuperAdminLocalSession = (): void => {
+const createSuperAdminLocalSession = (email = ''): void => {
   const session: SuperAdminSession = {
     username: 'superadmin',
     name: 'Platform Owner',
-    email: '',
+    email,
     authenticatedAt: new Date().toISOString(),
   };
   localStorage.setItem(SAAS_SUPERADMIN_SESSION_KEY, JSON.stringify(session));
+};
+
+/**
+ * Auto-elevate straight into the Super Admin session on login, skipping
+ * the local PIN prompt entirely.
+ *
+ * This is safe to call unconditionally for every signed-in user: the
+ * gate here is isCurrentUserSuperAdminInDb(), which checks the
+ * `super_admins` table for the CURRENT authenticated Supabase user and
+ * is enforced server-side by RLS (see tenantService.ts). Nobody can
+ * make this return true just by typing a particular email into the
+ * login form - it only fires for an account that already has a real
+ * super_admins row, i.e. someone who was already going to pass the PIN
+ * screen. All this does is remove that extra local click/PIN step for
+ * that already-authorized account.
+ *
+ * The PIN itself still exists and loginOrSetupSuperAdminPin/
+ * changeSuperAdminPin still work normally - this just means a verified
+ * admin no longer has to use it to get in on a fresh login.
+ */
+export const autoElevateSuperAdminIfAuthorized = async (): Promise<boolean> => {
+  const isAdmin = await isCurrentUserSuperAdminInDb();
+  if (!isAdmin) return false;
+
+  if (!isSuperAdminAuthenticated()) {
+    const client = getSupabase();
+    const { data: userData } = client ? await client.auth.getUser() : { data: null as any };
+    const email = userData?.user?.email || '';
+    createSuperAdminLocalSession(email);
+    logSubscriptionAudit({
+      action: 'ADMIN_LOGIN',
+      shopId: 'PLATFORM',
+      shopName: 'Super Admin Console',
+      details: 'Super Admin auto-signed in on login (verified platform admin, PIN step skipped).',
+    });
+  }
+  return true;
 };
 
 export const loginSuperAdmin = async (password: string, username = 'superadmin'): Promise<boolean> => {

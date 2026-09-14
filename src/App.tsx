@@ -88,7 +88,7 @@ const MainApp: React.FC = () => {
     setIsSuperAdmin,
     refreshSubscriptionStatus,
   } = usePOS();
-  const { configured: authConfigured, userEmail, dbTenant, signOut } = useAuth();
+  const { configured: authConfigured, userEmail, dbTenant, signOut, isVerifiedSuperAdmin } = useAuth();
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [selectedReceipt, setSelectedReceipt] = useState<Transaction | null>(null);
@@ -100,6 +100,22 @@ const MainApp: React.FC = () => {
   const [isBusinessTypeModalOpen, setIsBusinessTypeModalOpen] = useState(false);
   const [initialSaleService, setInitialSaleService] = useState<string | undefined>(undefined);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  // Tracks whether we've already auto-dropped this login into the Super
+  // Admin dashboard, so exiting it (onExitAdmin) doesn't immediately
+  // snap the user right back in - see the effect below.
+  const [hasAutoOpenedSuperAdmin, setHasAutoOpenedSuperAdmin] = useState(false);
+
+  // A verified platform Super Admin (checked server-side against the
+  // super_admins table - see AuthContext/autoElevateSuperAdminIfAuthorized)
+  // is dropped straight into the admin dashboard on login, no manual
+  // "Open Super Admin" click or local PIN needed.
+  useEffect(() => {
+    if (isVerifiedSuperAdmin && !hasAutoOpenedSuperAdmin) {
+      setIsSuperAdmin(true);
+      setIsSuperAdminOpen(true);
+      setHasAutoOpenedSuperAdmin(true);
+    }
+  }, [isVerifiedSuperAdmin, hasAutoOpenedSuperAdmin, setIsSuperAdmin]);
 
   // Whenever the active business changes, always land back on the
   // dashboard. Without this, a tab that only makes sense for the

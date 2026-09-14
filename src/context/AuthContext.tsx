@@ -6,7 +6,11 @@ import {
   getMyShopMembership,
   signOutSupabaseUser,
 } from '../services/supabase';
-import { ensureTenantForShop, syncTenantsFromCloudIfAuthorized } from '../services/saasService';
+import {
+  ensureTenantForShop,
+  syncTenantsFromCloudIfAuthorized,
+  autoElevateSuperAdminIfAuthorized,
+} from '../services/saasService';
 import { fetchOwnTenantFromDb } from '../services/tenantService';
 import { fetchBusinessSubscriptionsFromDb } from '../services/businessSubscriptionService';
 import { TenantAccount, BusinessSubscription } from '../types/pos';
@@ -36,6 +40,13 @@ interface AuthState {
    * It can't be edited from devtools the way localStorage can.
    */
   dbBusinessSubscriptions: BusinessSubscription[] | null;
+  /**
+   * True once this signed-in user has been confirmed (server-side, via
+   * the super_admins table) as a real platform Super Admin for this
+   * session. App.tsx uses this to drop them straight into the Super
+   * Admin dashboard on login instead of requiring the local PIN step.
+   */
+  isVerifiedSuperAdmin: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -51,6 +62,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRole] = useState<string | null>(null);
   const [dbTenant, setDbTenant] = useState<TenantAccount | null>(null);
   const [dbBusinessSubscriptions, setDbBusinessSubscriptions] = useState<BusinessSubscription[] | null>(null);
+  const [isVerifiedSuperAdmin, setIsVerifiedSuperAdmin] = useState<boolean>(false);
 
   const resolveSession = useCallback(async () => {
     if (!configured) {
@@ -67,6 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setRole(null);
         setDbTenant(null);
         setDbBusinessSubscriptions(null);
+        setIsVerifiedSuperAdmin(false);
         return;
       }
       setUserId(user.id);
@@ -98,7 +111,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // tenant registry into local storage now, before the Super Admin
         // dashboard could possibly be opened.
         await syncTenantsFromCloudIfAuthorized();
+
+        // Same DB-verified check decides whether to drop this user
+        // straight into the Super Admin dashboard, skipping the local
+        // PIN prompt (see autoElevateSuperAdminIfAuthorized for why
+        // this can't be spoofed by just knowing/using an email).
+        const autoAdmin = await autoElevateSuperAdminIfAuthorized();
+        setIsVerifiedSuperAdmin(autoAdmin);
       } else {
+        setIsVerifiedSuperAdmin(false);
         setShopId(null);
         setRole(null);
         setDbTenant(null);
@@ -131,6 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRole(null);
     setDbTenant(null);
     setDbBusinessSubscriptions(null);
+    setIsVerifiedSuperAdmin(false);
   }, []);
 
   return (
@@ -144,6 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         dbTenant,
         dbBusinessSubscriptions,
+        isVerifiedSuperAdmin,
         refresh: resolveSession,
         signOut,
       }}
