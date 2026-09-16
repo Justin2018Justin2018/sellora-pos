@@ -30,9 +30,7 @@ import {
   GeneralSale,
   GeneralSaleItem,
   GeneralUnit,
-  TaxRule,
-  BusinessSubscription,
-  SubscriptionPlan
+  TaxRule
 } from '../types/pos';
 import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
 import { enqueueSync, processSyncQueue } from '../services/syncEngine';
@@ -46,14 +44,6 @@ import {
   computeSubscriptionStatus,
   updateTenant
 } from '../services/saasService';
-import {
-  getBusinessSubscriptions,
-  getActiveBusinessTypes,
-  subscribeBusinessType,
-  cancelBusinessType,
-  migrateLegacyBusinessType,
-  fetchBusinessSubscriptionsFromDb,
-} from '../services/businessSubscriptionService';
 import { BUSINESS_TYPES, getBusinessTypeConfig } from '../data/businessTypes';
 import {
   isSupabaseConfigured,
@@ -62,7 +52,6 @@ import {
   syncExpenseToSupabase,
   syncStockToSupabase,
   syncDebtToSupabase,
-  syncCustomerToSupabase,
   fetchTransactionsFromSupabase,
   testSupabaseConnection,
   deleteTransactionFromSupabase
@@ -110,18 +99,6 @@ interface POSContextType {
   businessMode: BusinessMode;
   setBusinessMode: (mode: BusinessMode) => void;
   updateBusinessType: (mode: BusinessMode) => void;
-
-  // Multi-Business Subscriptions
-  /** Raw subscription rows (one per business type) for the current tenant. */
-  businessSubscriptions: BusinessSubscription[];
-  /** Business types this tenant currently has active (unexpired, not cancelled) access to. Expands an 'all' bundle subscription. */
-  activeBusinessTypes: BusinessMode[];
-  /** True if the tenant currently has an active subscription for this business type. */
-  isBusinessSubscribed: (mode: BusinessMode) => boolean;
-  /** Activates or renews a subscription for an additional business type. */
-  subscribeToBusinessType: (mode: BusinessMode, plan: SubscriptionPlan, billingCycle: 'monthly' | 'annual', months?: number) => void;
-  /** Cancels a business's subscription. Access is revoked immediately; historical data for that business is preserved. */
-  cancelBusinessSubscription: (mode: BusinessMode) => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
   
@@ -364,112 +341,23 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentShopId, setCurrentShopId] = useState<string>(() =>
     localStorage.getItem(getTenantKeyStatic(getCurrentTenantId(), 'current_shop')) || DEFAULT_SHOPS[0].id
   );
-  // ------------------------------------------------------------
-  // Multi-Business Subscriptions
-  // ------------------------------------------------------------
-  // A tenant can hold several ACTIVE BusinessSubscription rows at
-  // once (one per business type they've paid for). `businessMode`
-  // below is which one of those is CURRENTLY selected/active in the
-  // UI - not which ones the tenant is allowed to use. setBusinessMode
-  // refuses to switch into a business type that isn't in
-  // activeBusinessTypes, so a subscription can never be bypassed by
-  // calling the context function directly (e.g. from devtools). The
-  // real, un-bypassable boundary is Supabase RLS (see
-  // supabase-schema-v4-business-isolation.sql) - this is defense in
-  // depth on top of that for the local/offline case.
-  const [businessSubscriptions, setBusinessSubscriptionsState] = useState<BusinessSubscription[]>(() => {
-    const tid = getCurrentTenantId();
-    const activeT = getCurrentTenant();
-    // First-run migration: a tenant created before this feature existed
-    // has no subscription rows yet, just a legacy single businessType.
-    // Turn that into one ACTIVE row so nobody loses access they already
-    // had.
-    return migrateLegacyBusinessType(tid, activeT.shopName, activeT.businessType, activeT.plan, activeT.expiryDate);
-  });
-
-  const activeBusinessTypes = useMemo<BusinessMode[]>(() => {
-    const tid = getCurrentTenantId();
-    return getActiveBusinessTypes(tid);
-  }, [businessSubscriptions]);
-
-  const isBusinessSubscribed = useCallback(
-    (mode: BusinessMode) => activeBusinessTypes.includes(mode),
-    [activeBusinessTypes]
-  );
-
-  // Best-effort refresh from Supabase - this is the authoritative,
-  // can't-be-spoofed picture when cloud sync is configured. Re-runs on
-  // tenant switch via the tenantId dependency below.
-  useEffect(() => {
-    if (!isSupabaseConfigured()) return;
-    const tid = getCurrentTenantId();
-    fetchBusinessSubscriptionsFromDb(tid).then((remote) => {
-      if (remote) setBusinessSubscriptionsState(remote);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTenantIdState]);
-
   const [businessMode, setBusinessModeState] = useState<BusinessMode>(() => {
     const tid = getCurrentTenantId();
     const activeT = getCurrentTenant();
     const stored = safeStorageGet<BusinessMode | null>(getTenantKeyStatic(tid, 'business_mode'), null);
-    const active = getActiveBusinessTypes(tid);
-    const preferred = stored || activeT.businessType || active[0] || 'cyber';
-    // Never boot into a business type this tenant no longer has an
-    // active subscription for (e.g. it expired/was cancelled since the
-    // last session) - fall back to whichever active business comes
-    // first instead.
-    return active.includes(preferred) ? preferred : (active[0] || preferred);
+    return stored || activeT.businessType || 'cyber';
   });
 
   const setBusinessMode = useCallback((mode: BusinessMode) => {
-    if (!activeBusinessTypes.includes(mode)) {
-      console.warn(`Blocked switch to "${mode}": no active subscription for this business.`);
-      return;
-    }
     setBusinessModeState(mode);
     const tid = getCurrentTenantId();
     localStorage.setItem(getTenantKeyStatic(tid, 'business_mode'), JSON.stringify(mode));
-    // businessType on the tenant record is kept only as a legacy/display
-    // "primary business" hint now - subscriptions are the real access
-    // control - so this is harmless to keep updating for old call sites.
     updateTenant(tid, { businessType: mode });
-  }, [activeBusinessTypes]);
+  }, []);
 
   const updateBusinessType = useCallback((mode: BusinessMode) => {
     setBusinessMode(mode);
   }, [setBusinessMode]);
-
-  const subscribeToBusinessType = useCallback((
-    mode: BusinessMode,
-    plan: SubscriptionPlan,
-    billingCycle: 'monthly' | 'annual',
-    months?: number
-  ) => {
-    const tid = getCurrentTenantId();
-    const activeT = getCurrentTenant();
-    const updated = subscribeBusinessType(tid, activeT.shopName, mode, plan, billingCycle, months);
-    setBusinessSubscriptionsState((prev) => {
-      const idx = prev.findIndex((s) => s.businessType === mode);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = updated;
-        return copy;
-      }
-      return [...prev, updated];
-    });
-  }, []);
-
-  const cancelBusinessSubscription = useCallback((mode: BusinessMode) => {
-    const tid = getCurrentTenantId();
-    const activeT = getCurrentTenant();
-    const didCancel = cancelBusinessType(tid, activeT.shopName, mode);
-    if (!didCancel) return;
-    setBusinessSubscriptionsState((prev) =>
-      prev.map((s) => (s.businessType === mode ? { ...s, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : s))
-    );
-  }, []);
-
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     (localStorage.getItem('mj_theme') as 'light' | 'dark') || 'light'
   );
@@ -711,6 +599,50 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return safeStorageGet(getTenantKeyStatic(tid, 'other_sales'), []);
   });
 
+  // 9. Bar & Pub State
+  const [barProducts, setBarProducts] = useState<GeneralProduct[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_products'), getBusinessTypeConfig('bar').defaultProducts as GeneralProduct[]);
+  });
+  const [barCategories, setBarCategories] = useState<GeneralCategory[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_categories'), getBusinessTypeConfig('bar').defaultCategories);
+  });
+  const [barSuppliers, setBarSuppliers] = useState<GeneralSupplier[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_suppliers'), getBusinessTypeConfig('bar').defaultSuppliers);
+  });
+  const [barPurchases, setBarPurchases] = useState<GeneralPurchase[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_purchases'), []);
+  });
+  const [barSales, setBarSales] = useState<GeneralSale[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_sales'), []);
+  });
+
+  // 10. Guest House & Lodging State
+  const [guestHouseProducts, setGuestHouseProducts] = useState<GeneralProduct[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_products'), getBusinessTypeConfig('guest_house').defaultProducts as GeneralProduct[]);
+  });
+  const [guestHouseCategories, setGuestHouseCategories] = useState<GeneralCategory[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_categories'), getBusinessTypeConfig('guest_house').defaultCategories);
+  });
+  const [guestHouseSuppliers, setGuestHouseSuppliers] = useState<GeneralSupplier[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_suppliers'), getBusinessTypeConfig('guest_house').defaultSuppliers);
+  });
+  const [guestHousePurchases, setGuestHousePurchases] = useState<GeneralPurchase[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_purchases'), []);
+  });
+  const [guestHouseSales, setGuestHouseSales] = useState<GeneralSale[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_sales'), []);
+  });
+
   // Dynamic active mappings based on businessMode
   const activeProducts =
     businessMode === 'cyber' ? cyberProducts :
@@ -720,6 +652,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantProducts :
     businessMode === 'pharmacy' ? pharmacyProducts :
     businessMode === 'other' ? otherProducts :
+    businessMode === 'bar' ? barProducts :
+    businessMode === 'guest_house' ? guestHouseProducts :
     businessMode === 'all' ? [...cyberProducts, ...gasProducts, ...techProducts, ...generalProducts] :
     generalProducts;
 
@@ -731,6 +665,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantProducts :
     businessMode === 'pharmacy' ? setPharmacyProducts :
     businessMode === 'other' ? setOtherProducts :
+    businessMode === 'bar' ? setBarProducts :
+    businessMode === 'guest_house' ? setGuestHouseProducts :
     setGeneralProducts;
 
   const activeCategories =
@@ -741,6 +677,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantCategories :
     businessMode === 'pharmacy' ? pharmacyCategories :
     businessMode === 'other' ? otherCategories :
+    businessMode === 'bar' ? barCategories :
+    businessMode === 'guest_house' ? guestHouseCategories :
     generalCategories;
 
   const setActiveCategories =
@@ -751,6 +689,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantCategories :
     businessMode === 'pharmacy' ? setPharmacyCategories :
     businessMode === 'other' ? setOtherCategories :
+    businessMode === 'bar' ? setBarCategories :
+    businessMode === 'guest_house' ? setGuestHouseCategories :
     setGeneralCategories;
 
   const activeSuppliers =
@@ -761,6 +701,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantSuppliers :
     businessMode === 'pharmacy' ? pharmacySuppliers :
     businessMode === 'other' ? otherSuppliers :
+    businessMode === 'bar' ? barSuppliers :
+    businessMode === 'guest_house' ? guestHouseSuppliers :
     generalSuppliers;
 
   const setActiveSuppliers =
@@ -771,6 +713,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantSuppliers :
     businessMode === 'pharmacy' ? setPharmacySuppliers :
     businessMode === 'other' ? setOtherSuppliers :
+    businessMode === 'bar' ? setBarSuppliers :
+    businessMode === 'guest_house' ? setGuestHouseSuppliers :
     setGeneralSuppliers;
 
   const activePurchases =
@@ -781,6 +725,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantPurchases :
     businessMode === 'pharmacy' ? pharmacyPurchases :
     businessMode === 'other' ? otherPurchases :
+    businessMode === 'bar' ? barPurchases :
+    businessMode === 'guest_house' ? guestHousePurchases :
     generalPurchases;
 
   const setActivePurchases =
@@ -791,6 +737,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantPurchases :
     businessMode === 'pharmacy' ? setPharmacyPurchases :
     businessMode === 'other' ? setOtherPurchases :
+    businessMode === 'bar' ? setBarPurchases :
+    businessMode === 'guest_house' ? setGuestHousePurchases :
     setGeneralPurchases;
 
   const activeSales =
@@ -801,6 +749,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantSales :
     businessMode === 'pharmacy' ? pharmacySales :
     businessMode === 'other' ? otherSales :
+    businessMode === 'bar' ? barSales :
+    businessMode === 'guest_house' ? guestHouseSales :
     generalSales;
 
   const setActiveSales =
@@ -811,6 +761,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantSales :
     businessMode === 'pharmacy' ? setPharmacySales :
     businessMode === 'other' ? setOtherSales :
+    businessMode === 'bar' ? setBarSales :
+    businessMode === 'guest_house' ? setGuestHouseSales :
     setGeneralSales;
 
   const addGeneralProduct = useCallback((prod: Omit<GeneralProduct, 'id'>) => {
@@ -910,11 +862,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         original: remaining,
         paid: 0,
         payments: [],
-        // Was previously hardcoded to 'cyber' regardless of the active
-        // business - fixed so a Shop/Gas/Electronics credit sale lands
-        // in that business's own debt register, not Cyber's.
-        kind: businessMode === 'cyber' ? 'cyber' : undefined,
-        businessType: businessMode,
+        kind: 'cyber',
       };
       setDebts((prev) => [newDebt, ...prev]);
     }
@@ -938,36 +886,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const tid = getCurrentTenantId();
     return safeStorageGet(getTenantKeyStatic(tid, 'customers'), isPrimaryTenantId(tid) ? DEFAULT_CUSTOMERS : []);
   });
-
-  // ------------------------------------------------------------
-  // Business-scoped views of expenses/debts/customers.
-  // ------------------------------------------------------------
-  // These three records types are stored as one flat list per tenant
-  // (unlike products/sales, which already have dedicated per-business
-  // arrays). To keep a Shop's expenses out of Cyber and vice versa,
-  // every record is tagged with `businessType` when created (see
-  // addExpense/addDebt/addCustomer below), and only records matching
-  // the CURRENTLY active business are exposed to the rest of the app
-  // through the context value. Backups/restore and internal
-  // update-by-id/delete-by-id logic intentionally keep using the full
-  // `expenses`/`debts`/`customers` state above them, so switching
-  // businesses never loses or reassigns another business's records.
-  // Legacy records created before this field existed default to
-  // 'cyber' (this app's original single business type) so nothing
-  // already saved silently disappears.
-  const visibleExpenses = useMemo(
-    () => expenses.filter((e) => (e.businessType || 'cyber') === businessMode),
-    [expenses, businessMode]
-  );
-  const visibleDebts = useMemo(
-    () => debts.filter((d) => (d.businessType || d.kind || 'cyber') === businessMode),
-    [debts, businessMode]
-  );
-  const visibleCustomers = useMemo(
-    () => customers.filter((c) => (c.businessType || 'cyber') === businessMode),
-    [customers, businessMode]
-  );
-
   const [suppliers, setSuppliers] = useState<Supplier[]>(() =>
     safeStorageGet('mj_pos_suppliers', [
       { id: 'SUP_1', name: 'Paper Converters Kenya', phone: '0722111222', email: 'orders@paperconverters.co.ke', productsSupplied: 'A4 & A3 Printing Reams' },
@@ -1029,11 +947,11 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .then((res) => {
           setIsSupabaseActive(res.success);
           if (res.success && res.tableReady) {
-            // Scope to this shop's own row (shop_members.shop_id ==
-            // currentTenantIdState) AND to the cyber business_type,
-            // since `transactions`/`stock` are this app's dedicated
-            // Cyber-only state - never another business's rows.
-            fetchTransactionsFromSupabase(currentTenantIdState, 'cyber')
+            // Scope to the active shop only - otherwise a user who is a
+            // member of more than one shop (via shop_members) would have
+            // every accessible shop's transactions merged into this one's
+            // view on load.
+            fetchTransactionsFromSupabase(currentShopId)
               .then((remoteTx) => {
                 if (remoteTx && remoteTx.length > 0) {
                   setTransactions((prev) => {
@@ -1057,28 +975,15 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const syncSupabaseCloud = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
     try {
-      await syncStockToSupabase(stock, currentTenantIdState, 'cyber');
+      await syncStockToSupabase(stock, currentShopId);
       for (const tx of transactions.slice(0, 30)) {
-        await syncTransactionToSupabase(tx, currentTenantIdState, 'cyber');
-      }
-      // Expenses/debts/customers are tagged per-business (businessType),
-      // so only the currently active business's records are pushed here
-      // - switching business and syncing again covers that business's
-      // own records the same way.
-      for (const exp of visibleExpenses.slice(0, 30)) {
-        await syncExpenseToSupabase(exp, currentTenantIdState, businessMode);
-      }
-      for (const debt of visibleDebts.slice(0, 30)) {
-        await syncDebtToSupabase(debt, currentTenantIdState, businessMode);
-      }
-      for (const cust of visibleCustomers.slice(0, 30)) {
-        await syncCustomerToSupabase(cust, currentTenantIdState, businessMode);
+        await syncTransactionToSupabase(tx, currentShopId);
       }
       setIsSupabaseActive(true);
     } catch (err) {
       console.warn('Sync to Supabase cloud notice:', err);
     }
-  }, [stock, transactions, currentTenantIdState, visibleExpenses, visibleDebts, visibleCustomers, businessMode]);
+  }, [stock, transactions, currentShopId]);
 
   // Theme synchronization
   useEffect(() => {
@@ -1297,24 +1202,21 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setOtherPurchases(safeStorageGet(getTenantKeyStatic(newTenantId, 'other_purchases'), []));
     setOtherSales(safeStorageGet(getTenantKeyStatic(newTenantId, 'other_sales'), []));
 
-    const targetSubs = migrateLegacyBusinessType(
-      newTenantId,
-      targetTenant.shopName,
-      targetTenant.businessType,
-      targetTenant.plan,
-      targetTenant.expiryDate
-    );
-    setBusinessSubscriptionsState(targetSubs);
-    const targetActive = getActiveBusinessTypes(newTenantId);
-    const preferredMode = (targetTenant.businessType as BusinessMode) || targetActive[0] || 'cyber';
-    const targetMode = targetActive.includes(preferredMode) ? preferredMode : (targetActive[0] || preferredMode);
+    setBarProducts(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_products'), getBusinessTypeConfig('bar').defaultProducts as GeneralProduct[]));
+    setBarCategories(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_categories'), getBusinessTypeConfig('bar').defaultCategories));
+    setBarSuppliers(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_suppliers'), getBusinessTypeConfig('bar').defaultSuppliers));
+    setBarPurchases(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_purchases'), []));
+    setBarSales(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_sales'), []));
+
+    setGuestHouseProducts(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_products'), getBusinessTypeConfig('guest_house').defaultProducts as GeneralProduct[]));
+    setGuestHouseCategories(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_categories'), getBusinessTypeConfig('guest_house').defaultCategories));
+    setGuestHouseSuppliers(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_suppliers'), getBusinessTypeConfig('guest_house').defaultSuppliers));
+    setGuestHousePurchases(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_purchases'), []));
+    setGuestHouseSales(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_sales'), []));
+
+    const targetMode = (targetTenant.businessType as BusinessMode) || 'cyber';
     setBusinessModeState(targetMode);
     localStorage.setItem(getTenantKeyStatic(newTenantId, 'business_mode'), JSON.stringify(targetMode));
-    if (isSupabaseConfigured()) {
-      fetchBusinessSubscriptionsFromDb(newTenantId).then((remote) => {
-        if (remote) setBusinessSubscriptionsState(remote);
-      });
-    }
 
     setFamilyExpenses(safeStorageGet(getTenantKeyStatic(newTenantId, 'family_expenses'), []));
     setFamilyIncomeManual(safeStorageGet(getTenantKeyStatic(newTenantId, 'family_income'), []));
@@ -1379,6 +1281,18 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(getTenantKeyStatic(tid, 'other_suppliers'), JSON.stringify(otherSuppliers));
     localStorage.setItem(getTenantKeyStatic(tid, 'other_purchases'), JSON.stringify(otherPurchases));
     localStorage.setItem(getTenantKeyStatic(tid, 'other_sales'), JSON.stringify(otherSales));
+
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_products'), JSON.stringify(barProducts));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_categories'), JSON.stringify(barCategories));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_suppliers'), JSON.stringify(barSuppliers));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_purchases'), JSON.stringify(barPurchases));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_sales'), JSON.stringify(barSales));
+
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_products'), JSON.stringify(guestHouseProducts));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_categories'), JSON.stringify(guestHouseCategories));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_suppliers'), JSON.stringify(guestHouseSuppliers));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_purchases'), JSON.stringify(guestHousePurchases));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_sales'), JSON.stringify(guestHouseSales));
   }, [
     cyberProducts, cyberCategories, cyberSuppliers, cyberPurchases, cyberSales,
     gasProducts, gasCategories, gasSuppliers, gasPurchases, gasSales,
@@ -1387,7 +1301,9 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     clothingProducts, clothingCategories, clothingSuppliers, clothingPurchases, clothingSales,
     restaurantProducts, restaurantCategories, restaurantSuppliers, restaurantPurchases, restaurantSales,
     pharmacyProducts, pharmacyCategories, pharmacySuppliers, pharmacyPurchases, pharmacySales,
-    otherProducts, otherCategories, otherSuppliers, otherPurchases, otherSales
+    otherProducts, otherCategories, otherSuppliers, otherPurchases, otherSales,
+    barProducts, barCategories, barSuppliers, barPurchases, barSales,
+    guestHouseProducts, guestHouseCategories, guestHouseSuppliers, guestHousePurchases, guestHouseSales
   ]);
 
   // Current shop helper
@@ -1450,9 +1366,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return acc + sum;
     }, 0);
 
-    // From Debts (reserved stock) - scoped to the active business only,
-    // so a Gas or Electronics debt never eats into Cyber material stock.
-    const debtUsed = visibleDebts.reduce((acc, d) => {
+    // From Debts (reserved stock)
+    const debtUsed = debts.reduce((acc, d) => {
       let sum = 0;
       if (Array.isArray(d.stockUsed)) {
         d.stockUsed.forEach((u) => {
@@ -1473,7 +1388,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 0);
 
     return cyberUsed + debtUsed + wasteUsed;
-  }, [transactions, visibleDebts, wastage]);
+  }, [transactions, debts, wastage]);
 
   const stockRemaining = useCallback(
     (item: StockItem): number => {
@@ -2015,7 +1930,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       staff: currentUser ? currentUser.name : 'Administrator',
       shopId: currentShopId,
       status: 'completed',
-      businessType: 'cyber',
     };
 
     setTransactions((prev) => [newTx, ...prev]);
@@ -2049,7 +1963,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               totalSpent: newTx.total,
               debtBalance: 0,
               lastSeen: newTx.date,
-              businessType: 'cyber',
             },
           ];
         }
@@ -2341,7 +2254,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: Date.now(),
       staff: currentUser ? currentUser.name : 'Administrator',
       shopId: currentShopId,
-      businessType: expenseData.businessType || businessMode,
     };
     setExpenses((prev) => [newExp, ...prev]);
     logAudit('ADD_EXPENSE', `Expense recorded: ${newExp.desc} — ${formatMoney(newExp.amount)}`);
@@ -2383,7 +2295,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       staff: currentUser ? currentUser.name : 'Administrator',
       shopId: currentShopId,
       payments: [],
-      businessType: debtData.businessType || businessMode,
     };
     setDebts((prev) => [newDebt, ...prev]);
 
@@ -2514,8 +2425,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Customers & Suppliers
   const addCustomer = (cust: Customer) => {
-    const tagged: Customer = { ...cust, businessType: cust.businessType || businessMode };
-    setCustomers((prev) => [...prev, tagged]);
+    setCustomers((prev) => [...prev, cust]);
     logAudit('ADD_CUSTOMER', `Added customer: ${cust.name}`);
   };
 
@@ -2742,11 +2652,6 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         businessMode,
         setBusinessMode,
         updateBusinessType,
-        businessSubscriptions,
-        activeBusinessTypes,
-        isBusinessSubscribed,
-        subscribeToBusinessType,
-        cancelBusinessSubscription,
         theme,
         toggleTheme,
         taxRules: profile.taxRules || [],
@@ -2818,15 +2723,15 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         generalSales: activeSales,
         recordGeneralSale,
         deleteGeneralSale,
-        expenses: visibleExpenses,
+        expenses,
         addExpense,
         updateExpense,
         deleteExpense,
-        debts: visibleDebts,
+        debts,
         addDebt,
         recordDebtPayment,
         deleteDebt,
-        customers: visibleCustomers,
+        customers,
         addCustomer,
         updateCustomer,
         deleteCustomer,

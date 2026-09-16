@@ -11,9 +11,11 @@ import {
   DollarSign,
   AlertTriangle,
   CheckCircle2,
+  Camera,
   X
 } from 'lucide-react';
 import { GeneralProduct, GeneralUnit } from '../../types/pos';
+import { BarcodeScannerModal } from '../common/BarcodeScannerModal';
 
 export const GeneralProductsView: React.FC = () => {
   const {
@@ -36,6 +38,7 @@ export const GeneralProductsView: React.FC = () => {
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [category, setCategory] = useState(generalCategories[0]?.name || 'Food & Grains');
   const [buyingPrice, setBuyingPrice] = useState<number>(0);
   const [sellingPrice, setSellingPrice] = useState<number>(0);
@@ -328,13 +331,23 @@ export const GeneralProductsView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Barcode</label>
-                  <input
-                    type="text"
-                    value={barcode}
-                    onChange={(e) => setBarcode(e.target.value)}
-                    placeholder="6161000000"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-hidden focus:border-emerald-500 font-mono"
-                  />
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={barcode}
+                      onChange={(e) => setBarcode(e.target.value)}
+                      placeholder="6161000000"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-hidden focus:border-emerald-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsScannerOpen(true)}
+                      title="Scan with camera"
+                      className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white shrink-0"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -448,6 +461,16 @@ export const GeneralProductsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={(code) => {
+          setBarcode(code);
+          setIsScannerOpen(false);
+        }}
+        title="Scan Product Barcode"
+      />
     </div>
   );
 };

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { TabKey } from './Navigation';
 import { getBusinessTypeConfig } from '../../data/businessTypes';
-import { BusinessSwitcher } from './BusinessSwitcher';
+import { BusinessSwitcher } from '../business/BusinessSwitcher';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -20,6 +20,7 @@ import {
   UserCog,
   Settings,
   Bot,
+  Printer,
   LogOut,
   X,
   Store,
@@ -30,6 +31,7 @@ import {
   Building2,
   TrendingUp,
   Sparkles,
+  RefreshCw,
   Layers,
 } from 'lucide-react';
 
@@ -56,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     profile,
     currentShop,
     businessMode,
+    setBusinessMode,
     lowStockItems,
     debts,
     currentUser,
@@ -193,7 +196,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ];
     }
 
-    // Default for General Shop, Clothing, Restaurant, Pharmacy, Other
+    // Default for General Shop, Clothing, Restaurant, Pharmacy, Bar, Guest House, Other
     return [
       { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { key: 'sale', label: 'New Sale', icon: ShoppingCart },
@@ -266,15 +269,92 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Business Selector / Switcher - shows the active business
-            prominently, and (only when the tenant has more than one
-            active subscription) lets them switch between businesses.
-            Always offers a way to subscribe to another business. This
-            replaces the old always-visible 4-button "Cyber/Gas/Tech/
-            Shop" grid, which called setBusinessMode() unconditionally
-            for every business regardless of whether it was actually
-            subscribed. */}
-        {onOpenBusinessTypeModal && <BusinessSwitcher onOpenAddBusiness={onOpenBusinessTypeModal} />}
+        {/* Active POS Business Card with Change Plan Action */}
+        <div className="mt-3.5 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2 shadow-inner">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl shrink-0">{activeConfig.emoji}</span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white truncate leading-tight">
+                {activeConfig.shortName} POS
+              </p>
+              <p className="text-[10px] text-blue-400 font-semibold truncate">
+                KES {activeConfig.monthlyPrice.toLocaleString()}/mo
+              </p>
+            </div>
+          </div>
+
+          {onOpenBusinessTypeModal && (
+            <button
+              onClick={onOpenBusinessTypeModal}
+              className="px-2 py-1 bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-300 hover:text-white text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+              title="Change POS business type or upgrade subscription"
+            >
+              <RefreshCw className="w-2.5 h-2.5" />
+              <span>Change</span>
+            </button>
+          )}
+        </div>
+
+        {/* Real multi-business switcher - separate, fully isolated
+            businesses per subscription (see AuthContext.memberships).
+            Distinct from "Change" above, which just relabels this same
+            shop's business type - this switches between entirely
+            different shop_ids/data sets. */}
+        <div className="mt-2">
+          <BusinessSwitcher />
+        </div>
+
+        {/* Quick Switcher across Core Trades */}
+        <div className="mt-2.5 grid grid-cols-4 gap-1 text-[10px] font-bold">
+          <button
+            onClick={() => setBusinessMode('cyber')}
+            title="Switch to Cyber POS"
+            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+              businessMode === 'cyber'
+                ? 'bg-blue-600 text-white shadow-sm font-black'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Printer className="w-3 h-3" />
+            <span>Cyber</span>
+          </button>
+          <button
+            onClick={() => setBusinessMode('gas')}
+            title="Switch to Gas/LPG POS"
+            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+              businessMode === 'gas'
+                ? 'bg-amber-600 text-white shadow-sm font-black'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Fuel className="w-3 h-3" />
+            <span>Gas</span>
+          </button>
+          <button
+            onClick={() => setBusinessMode('electronics')}
+            title="Switch to Tech/Electronics POS"
+            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+              businessMode === 'electronics'
+                ? 'bg-purple-600 text-white shadow-sm font-black'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Smartphone className="w-3 h-3" />
+            <span>Tech</span>
+          </button>
+          <button
+            onClick={() => setBusinessMode('general_shop')}
+            title="Switch to General Shop POS"
+            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
+              businessMode === 'general_shop'
+                ? 'bg-emerald-600 text-white shadow-sm font-black'
+                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <ShoppingCart className="w-3 h-3" />
+            <span>Shop</span>
+          </button>
+        </div>
       </div>
 
       {/* Nav List */}

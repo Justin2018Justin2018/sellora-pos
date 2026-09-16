@@ -38,9 +38,6 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
   const {
     businessMode,
     setBusinessMode,
-    activeBusinessTypes,
-    isBusinessSubscribed,
-    subscribeToBusinessType,
     currentTenant,
     switchTenant,
     addToast,
@@ -82,28 +79,24 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
       ? 'PREMIUM'
       : 'STANDARD';
 
-  const alreadySubscribed = isBusinessSubscribed(selectedType);
-  const isCurrentActiveSelection = mode === 'change_type' && businessMode === selectedType;
-
-  // Handle activating (or renewing) a business for the current tenant.
-  // This is additive - it never removes access to any business the
-  // tenant already has. Existing businesses keep working exactly as
-  // they did; this only adds selectedType (or renews it, if it had
-  // lapsed) to the tenant's active subscriptions, then switches into
-  // it. See businessSubscriptionService.subscribeBusinessType and
-  // supabase-schema-v4-business-isolation.sql for the real enforcement
-  // behind this - this button is the self-service checkout for it.
+  // Handle immediate change for existing tenant
   const handleApplyChange = () => {
     setIsSubmitting(true);
     setTimeout(() => {
-      subscribeToBusinessType(selectedType, planForType, billingCycle);
+      // 1. Update context business mode
       setBusinessMode(selectedType);
 
+      // 2. Persist to current tenant
+      if (currentTenant?.id) {
+        updateTenant(currentTenant.id, {
+          businessType: selectedType,
+          plan: planForType,
+        });
+      }
+
       addToast({
-        title: `${activeConfig.name} ${alreadySubscribed ? 'Renewed' : 'Activated'}!`,
-        message: alreadySubscribed
-          ? `Your ${activeConfig.shortName} subscription has been renewed.`
-          : `${activeConfig.shortName} is now available from your Business Switcher - your other businesses are untouched.`,
+        title: `${activeConfig.name} Activated!`,
+        message: `Your POS layout, categories, and features are now optimized for ${activeConfig.shortName}.`,
         type: 'success',
       });
 
@@ -146,8 +139,7 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
     });
 
     if (res.success && res.tenant) {
-      // Update tenant businessType (kept as a legacy/display "primary
-      // business" hint - see TenantAccount.businessType).
+      // Update tenant businessType
       updateTenant(res.tenant.id, { businessType: selectedType });
 
       addToast({
@@ -156,13 +148,8 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
         type: 'success',
       });
 
-      // Switch to newly created tenant and activate their chosen
-      // business with the exact plan/billing cycle/expiry they signed
-      // up for (rather than relying on the generic legacy-migration
-      // fallback, which only kicks in when no subscription rows exist
-      // yet for a tenant).
+      // Switch to newly created tenant and set mode
       switchTenant(res.tenant.id);
-      subscribeToBusinessType(selectedType, planForType, billingCycle);
       setBusinessMode(selectedType);
 
       setIsSubmitting(false);
@@ -186,13 +173,11 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
               <div>
                 <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
                   {mode === 'change_type'
-                    ? 'Subscribe to a Business'
+                    ? 'Choose Your Business POS Type & Plan'
                     : 'Register New Shop — Select Your POS Type'}
                 </h2>
                 <p className="text-xs text-blue-200 font-medium mt-0.5">
-                  {mode === 'change_type'
-                    ? "You're only charged for each business you activate. Your other businesses keep working exactly as they are."
-                    : 'You are only charged for the specific POS type you select. Add more businesses anytime.'}
+                  You are only charged for the specific POS type you select. Change or upgrade anytime.
                 </p>
               </div>
             </div>
@@ -254,11 +239,10 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
                 <Sparkles className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                 <div className="text-xs sm:text-sm text-slate-700 dark:text-slate-300">
                   <span className="font-bold text-blue-900 dark:text-blue-300">
-                    Run Multiple Businesses, Fully Separated:
+                    Tailored for Your Exact Trade:
                   </span>{' '}
-                  {mode === 'change_type'
-                    ? 'Each business you activate gets its own dashboard, products, sales, inventory, customers, reports, and settings - none of it mixes with your other businesses. Use the Business Switcher in the sidebar to move between them.'
-                    : 'Selecting a business type automatically adapts your Point of Sale console, inventory units, preloaded categories, receipt headers, and analytics to your specific industry!'}
+                  Selecting a business type automatically adapts your Point of Sale console, inventory
+                  units, preloaded categories, receipt headers, and analytics to your specific industry!
                 </div>
               </div>
 
@@ -267,8 +251,6 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
                 {getBusinessTypes().map((type) => {
                   const isSelected = selectedType === type.id;
                   const isCurrentActive = mode === 'change_type' && businessMode === type.id;
-                  const isSubscribedNotActive =
-                    mode === 'change_type' && !isCurrentActive && isBusinessSubscribed(type.id);
                   const price =
                     billingCycle === 'monthly' ? type.monthlyPrice : type.annualPrice;
 
@@ -342,13 +324,6 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
                         <div className="mt-3 text-center">
                           <span className="inline-block text-[10px] font-bold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">
                             Currently Active On Your POS
-                          </span>
-                        </div>
-                      )}
-                      {isSubscribedNotActive && (
-                        <div className="mt-3 text-center">
-                          <span className="inline-block text-[10px] font-bold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full">
-                            Subscribed - Switch to Use
                           </span>
                         </div>
                       )}
@@ -543,25 +518,13 @@ export const BusinessTypeSelectionModal: React.FC<BusinessTypeSelectionModalProp
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Activating...</span>
-                    </>
-                  ) : isCurrentActiveSelection ? (
-                    <>
-                      <RefreshCw className="w-4 h-4" />
-                      <span>
-                        Renew {activeConfig.shortName} (KES {priceToPay.toLocaleString()})
-                      </span>
-                    </>
-                  ) : alreadySubscribed ? (
-                    <>
-                      <ArrowRight className="w-4 h-4" />
-                      <span>Switch to {activeConfig.shortName}</span>
+                      <span>Activating POS Type...</span>
                     </>
                   ) : (
                     <>
                       <Check className="w-4 h-4 stroke-[3]" />
                       <span>
-                        Subscribe to {activeConfig.shortName} (KES {priceToPay.toLocaleString()})
+                        Switch to {activeConfig.shortName} (KES {priceToPay.toLocaleString()})
                       </span>
                     </>
                   )}

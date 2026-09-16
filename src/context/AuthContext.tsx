@@ -3,17 +3,15 @@ import {
   isSupabaseConfigured,
   getSupabase,
   getCurrentSupabaseUser,
-  getMyShopMembership,
+  getMyShopMemberships,
+  BusinessMembership,
   signOutSupabaseUser,
 } from '../services/supabase';
-import {
-  ensureTenantForShop,
-  syncTenantsFromCloudIfAuthorized,
-  autoElevateSuperAdminIfAuthorized,
-} from '../services/saasService';
+import { ensureTenantForShop, syncTenantsFromCloudIfAuthorized } from '../services/saasService';
 import { fetchOwnTenantFromDb } from '../services/tenantService';
-import { fetchBusinessSubscriptionsFromDb } from '../services/businessSubscriptionService';
-import { TenantAccount, BusinessSubscription } from '../types/pos';
+import { TenantAccount } from '../types/pos';
+
+const ACTIVE_BUSINESS_KEY = 'sellora_active_business_shop_id';
 
 interface AuthState {
   /** Whether this deployment has real Supabase credentials configured. */
@@ -22,31 +20,33 @@ interface AuthState {
   loading: boolean;
   userId: string | null;
   userEmail: string | null;
-  /** shop_id this user is a member of, per shop_members (null if none yet). */
+  /**
+   * Every business (shop) this customer has - a customer can hold
+   * several active subscriptions at once (e.g. Shop + Cyber), each
+   * fully isolated by shop_id via RLS. Empty if not linked to any
+   * business yet.
+   */
+  memberships: BusinessMembership[];
+  /** shop_id of the business currently in use. null if the user has none yet. */
   shopId: string | null;
   role: string | null;
   /**
    * Authoritative subscription/tenant row pulled directly from Supabase
-   * for the current shop (null if not configured, not linked yet, or no
-   * DB row exists for this shop). When present, this - not the local
+   * for the ACTIVE business (null if not configured, not linked yet, or
+   * no DB row exists for this shop). When present, this - not the local
    * tenant copy - should decide whether the app is subscription-blocked.
    */
   dbTenant: TenantAccount | null;
   /**
-   * Authoritative list of this shop's per-business subscriptions,
-   * pulled straight from Supabase (null if not configured/linked yet).
-   * This - not the local cache - decides which businesses (Shop,
-   * Cyber, Gas, Electronics, ...) the signed-in user may switch into.
-   * It can't be edited from devtools the way localStorage can.
+   * Switches which business is active for this session. Only succeeds
+   * for a business this customer actually has an ACTIVE subscription
+   * for - never lets them switch into an expired/suspended/unclaimed
+   * one. Reloads the app after switching so every existing view
+   * (POSContext included) re-initializes cleanly from the newly active
+   * business's own data, with zero chance of one business's in-memory
+   * state bleeding into another's screen mid-session.
    */
-  dbBusinessSubscriptions: BusinessSubscription[] | null;
-  /**
-   * True once this signed-in user has been confirmed (server-side, via
-   * the super_admins table) as a real platform Super Admin for this
-   * session. App.tsx uses this to drop them straight into the Super
-   * Admin dashboard on login instead of requiring the local PIN step.
-   */
-  isVerifiedSuperAdmin: boolean;
+  switchActiveBusiness: (shopId: string) => void;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -58,11 +58,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(configured);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [memberships, setMemberships] = useState<BusinessMembership[]>([]);
   const [shopId, setShopId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [dbTenant, setDbTenant] = useState<TenantAccount | null>(null);
-  const [dbBusinessSubscriptions, setDbBusinessSubscriptions] = useState<BusinessSubscription[] | null>(null);
-  const [isVerifiedSuperAdmin, setIsVerifiedSuperAdmin] = useState<boolean>(false);
 
   const resolveSession = useCallback(async () => {
     if (!configured) {
@@ -75,55 +74,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!user) {
         setUserId(null);
         setUserEmail(null);
+        setMemberships([]);
         setShopId(null);
         setRole(null);
         setDbTenant(null);
-        setDbBusinessSubscriptions(null);
-        setIsVerifiedSuperAdmin(false);
         return;
       }
       setUserId(user.id);
       setUserEmail(user.email ?? null);
 
-      const membership = await getMyShopMembership();
-      if (membership) {
-        setShopId(membership.shopId);
-        setRole(membership.role);
+      const allMemberships = await getMyShopMemberships();
+      setMemberships(allMemberships);
 
-        // Authoritative subscription status for THIS shop, straight from
-        // the database - can't be spoofed by editing localStorage.
-        const own = await fetchOwnTenantFromDb(membership.shopId);
+      if (allMemberships.length > 0) {
+        // Prefer the previously-selected business if the customer still
+        // actually has it and it's still active; otherwise fall back to
+        // the first active one, or just the first one at all (so an
+        // expired-only account still opens to something and can show
+        // the subscription-blocked screen rather than nothing).
+        const savedShopId = localStorage.getItem(ACTIVE_BUSINESS_KEY);
+        const savedIsValid = savedShopId && allMemberships.some((m) => m.shopId === savedShopId);
+        const firstActive = allMemberships.find((m) => m.status === 'ACTIVE');
+        const chosen = (savedIsValid ? savedShopId : null) || firstActive?.shopId || allMemberships[0].shopId;
+
+        const chosenMembership = allMemberships.find((m) => m.shopId === chosen)!;
+        setShopId(chosen);
+        setRole(chosenMembership.role);
+        localStorage.setItem(ACTIVE_BUSINESS_KEY, chosen);
+
+        // Authoritative subscription status for the ACTIVE business,
+        // straight from the database - can't be spoofed by editing
+        // localStorage.
+        const own = await fetchOwnTenantFromDb(chosen);
         setDbTenant(own);
-
-        // Authoritative list of which businesses (Shop, Cyber, Gas,
-        // Electronics, ...) this shop currently has active - same
-        // can't-be-spoofed guarantee as dbTenant above.
-        const subs = await fetchBusinessSubscriptionsFromDb(membership.shopId);
-        setDbBusinessSubscriptions(subs);
 
         // Bridge into the existing tenant-keyed local data model so every
         // existing view keeps working unchanged (see ensureTenantForShop).
-        // Passing the DB record keeps business type/plan/status accurate
-        // even the first time this shop is opened on a new device.
-        ensureTenantForShop(membership.shopId, { ownerEmail: user.email ?? undefined }, own);
+        ensureTenantForShop(chosen, { ownerEmail: user.email ?? undefined }, own);
 
         // If this user is a real platform super admin, pull the full
         // tenant registry into local storage now, before the Super Admin
         // dashboard could possibly be opened.
         await syncTenantsFromCloudIfAuthorized();
-
-        // Same DB-verified check decides whether to drop this user
-        // straight into the Super Admin dashboard, skipping the local
-        // PIN prompt (see autoElevateSuperAdminIfAuthorized for why
-        // this can't be spoofed by just knowing/using an email).
-        const autoAdmin = await autoElevateSuperAdminIfAuthorized();
-        setIsVerifiedSuperAdmin(autoAdmin);
       } else {
-        setIsVerifiedSuperAdmin(false);
         setShopId(null);
         setRole(null);
         setDbTenant(null);
-        setDbBusinessSubscriptions(null);
       }
     } finally {
       setLoading(false);
@@ -144,15 +140,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configured]);
 
+  const switchActiveBusiness = useCallback(
+    (targetShopId: string) => {
+      const target = memberships.find((m) => m.shopId === targetShopId);
+      if (!target) return;
+      if (target.status !== 'ACTIVE') return; // never allow switching into an inactive subscription
+      localStorage.setItem(ACTIVE_BUSINESS_KEY, targetShopId);
+      // Full reload - the safest way to guarantee POSContext and every
+      // other view re-initializes purely from the newly active
+      // business's own data, with no risk of one business's state
+      // carrying over into another's screen.
+      window.location.reload();
+    },
+    [memberships]
+  );
+
   const signOut = useCallback(async () => {
     await signOutSupabaseUser();
     setUserId(null);
     setUserEmail(null);
+    setMemberships([]);
     setShopId(null);
     setRole(null);
     setDbTenant(null);
-    setDbBusinessSubscriptions(null);
-    setIsVerifiedSuperAdmin(false);
   }, []);
 
   return (
@@ -162,11 +172,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         userId,
         userEmail,
+        memberships,
         shopId,
         role,
         dbTenant,
-        dbBusinessSubscriptions,
-        isVerifiedSuperAdmin,
+        switchActiveBusiness,
         refresh: resolveSession,
         signOut,
       }}

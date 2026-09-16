@@ -41,7 +41,6 @@ interface ReportsViewProps {
 export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
   const {
     profile,
-    businessMode,
     transactions,
     gasTransactions,
     electronicsSales,
@@ -115,46 +114,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
   }, [period]);
 
   // Cyber Sales
-  // NOTE: Reports was originally built as a combined P&L across
-  // Cyber+Gas+Electronics regardless of which business was active -
-  // that directly conflicts with per-business isolation ("Shop
-  // reports" must only ever show Shop data). Each of the three
-  // sources below now returns nothing unless IT is the active
-  // business, so switching businesses switches Reports along with
-  // everything else. (General Shop/Clothing/Restaurant/Pharmacy/Other
-  // aren't wired into this P&L at all yet - their sales live in
-  // `generalSales` - so Reports intentionally shows zero rather than
-  // leaking another vertical's numbers for those modes; a dedicated
-  // General-Shop P&L is a good follow-up.)
   const periodCyberSales = useMemo(() => {
-    if (businessMode !== 'cyber') return [];
     return transactions.filter((t) => {
       if (t.status === 'cancelled' || t.payment === 'Credit / Debt') return false;
       if (!dateRange) return true;
       const d = new Date(t.date);
       return d >= dateRange.start && d <= dateRange.end;
     });
-  }, [transactions, dateRange, businessMode]);
+  }, [transactions, dateRange]);
 
   // Gas Sales
   const periodGasSales = useMemo(() => {
-    if (businessMode !== 'gas') return [];
     return gasTransactions.filter((g) => {
       if (!dateRange) return true;
       const d = new Date(g.date);
       return d >= dateRange.start && d <= dateRange.end;
     });
-  }, [gasTransactions, dateRange, businessMode]);
+  }, [gasTransactions, dateRange]);
 
   // Electronics Sales
   const periodElectronicsSales = useMemo(() => {
-    if (businessMode !== 'electronics') return [];
     return electronicsSales.filter((e) => {
       if (!dateRange) return true;
       const d = new Date(e.date);
       return d >= dateRange.start && d <= dateRange.end;
     });
-  }, [electronicsSales, dateRange, businessMode]);
+  }, [electronicsSales, dateRange]);
 
   // Expenses
   const periodExpenses = useMemo(() => {

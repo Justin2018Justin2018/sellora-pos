@@ -196,9 +196,9 @@ export interface ShopMembership {
 
 /**
  * Looks up which shop (if any) the currently signed-in user belongs to,
- * via the shop_members table. This is what the login gate uses to decide
- * whether a signed-in user already has a shop, or needs to link/create one.
- * Relies on RLS (a user can only ever see their own shop_members row).
+ * via the shop_members table. Kept for any code that only cares about
+ * "do they have at least one business" - prefer getMyShopMemberships
+ * for anything that needs to know about ALL of a user's businesses.
  */
 export const getMyShopMembership = async (): Promise<ShopMembership | null> => {
   const client = getSupabase();
@@ -216,6 +216,77 @@ export const getMyShopMembership = async (): Promise<ShopMembership | null> => {
 
   if (error || !data) return null;
   return { shopId: data.shop_id as string, role: (data.role as string) || 'owner' };
+};
+
+export interface BusinessMembership {
+  shopId: string;
+  role: string;
+  shopName: string;
+  businessType: string | null;
+  status: string;
+  expiryDate: string;
+}
+
+/**
+ * Returns EVERY business (shop) the signed-in user belongs to - a
+ * customer can hold multiple active business subscriptions at once
+ * (e.g. Shop + Cyber), each fully isolated by shop_id via RLS. This is
+ * what the Business Switcher and "Add Business" flow are built on.
+ */
+export const getMyShopMemberships = async (): Promise<BusinessMembership[]> => {
+  const client = getSupabase();
+  if (!client) return [];
+  const { data: userData } = await client.auth.getUser();
+  const uid = userData?.user?.id;
+  if (!uid) return [];
+
+  const { data, error } = await client
+    .from('shop_members')
+    .select('shop_id, role, saas_tenants(shop_name, business_type, status, expiry_date)')
+    .eq('user_id', uid);
+
+  if (error || !data) return [];
+
+  return data.map((row: any) => ({
+    shopId: row.shop_id,
+    role: row.role || 'owner',
+    shopName: row.saas_tenants?.shop_name || row.shop_id,
+    businessType: row.saas_tenants?.business_type || null,
+    status: row.saas_tenants?.status || 'ACTIVE',
+    expiryDate: row.saas_tenants?.expiry_date || '',
+  }));
+};
+
+/**
+ * Adds an ADDITIONAL business to the currently signed-in user's own
+ * account (e.g. an existing Shop customer subscribing to Cyber too) -
+ * distinct from claimShopForCurrentUser's recovery-path use, though it
+ * uses the same underlying RPC. A brand-new, never-before-used shop_id
+ * is required; claim_shop guarantees a shop_id can only be claimed once.
+ */
+export const claimAdditionalBusiness = async (
+  shopId: string,
+  businessType: string,
+  shopName: string
+): Promise<SupabaseAuthResult> => {
+  const client = getSupabase();
+  if (!client) return { success: false, message: 'Supabase is not configured.' };
+
+  const { error } = await client.rpc('claim_shop', {
+    p_shop_id: shopId,
+    p_business_type: businessType,
+    p_shop_name: shopName,
+  });
+
+  if (error) {
+    return {
+      success: false,
+      message: error.message.includes('already claimed')
+        ? 'That business name is already taken. Try a slightly different name.'
+        : `Could not create business: ${error.message}`,
+    };
+  }
+  return { success: true, message: `${shopName} added to your account.` };
 };
 
 /**
@@ -304,8 +375,7 @@ export const testSupabaseConnection = async (): Promise<{
  */
 export const syncTransactionToSupabase = async (
   tx: Transaction,
-  shopId: string,
-  businessType?: string
+  shopId: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -326,7 +396,6 @@ export const syncTransactionToSupabase = async (
       notes: tx.notes || null,
       material_cost: tx.materialTotal || 0,
       shop_id: shopId,
-      business_type: businessType || tx.businessType || 'cyber',
     });
     if (error) {
       console.warn('Failed to sync transaction to Supabase:', error.message);
@@ -344,8 +413,7 @@ export const syncTransactionToSupabase = async (
  */
 export const syncExpenseToSupabase = async (
   expense: Expense,
-  shopId: string,
-  businessType?: string
+  shopId: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -360,7 +428,6 @@ export const syncExpenseToSupabase = async (
       payment_method: expense.payment || 'Cash',
       recorded_by: expense.staff || 'Admin',
       shop_id: shopId,
-      business_type: businessType || expense.businessType || 'cyber',
     });
     if (error) {
       console.warn('Failed to sync expense to Supabase:', error.message);
@@ -378,8 +445,7 @@ export const syncExpenseToSupabase = async (
  */
 export const syncStockToSupabase = async (
   stockItems: StockItem[],
-  shopId: string,
-  businessType?: string
+  shopId: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -397,7 +463,6 @@ export const syncStockToSupabase = async (
       damaged_stock: 0,
       reorder_level: item.reorderLevel ?? 5,
       shop_id: shopId,
-      business_type: businessType || item.businessType || 'cyber',
     }));
 
     const { error } = await client.from('pos_stock').upsert(rows);
@@ -417,8 +482,7 @@ export const syncStockToSupabase = async (
  */
 export const syncDebtToSupabase = async (
   debt: DebtRecord,
-  shopId: string,
-  businessType?: string
+  shopId: string
 ): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
@@ -435,7 +499,6 @@ export const syncDebtToSupabase = async (
       status: debt.original - debt.paid <= 0 ? 'paid' : 'pending',
       staff: debt.staff || 'Admin',
       shop_id: shopId,
-      business_type: businessType || debt.businessType || debt.kind || 'cyber',
     });
     if (error) {
       console.warn('Failed to sync debt to Supabase:', error.message);
@@ -449,46 +512,10 @@ export const syncDebtToSupabase = async (
 };
 
 /**
- * Syncs a customer record to Supabase
- */
-export const syncCustomerToSupabase = async (
-  customer: Customer,
-  shopId: string,
-  businessType?: string
-): Promise<boolean> => {
-  const client = getSupabase();
-  if (!client) return false;
-
-  try {
-    const { error } = await client.from('pos_customers').upsert({
-      id: customer.id || customer.phone,
-      name: customer.name,
-      phone: customer.phone,
-      email: customer.email || null,
-      notes: customer.notes || null,
-      loyalty_points: customer.points || 0,
-      shop_id: shopId,
-      business_type: businessType || customer.businessType || 'cyber',
-    });
-    if (error) {
-      console.warn('Failed to sync customer to Supabase:', error.message);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn('Error syncing customer to Supabase:', err);
-    return false;
-  }
-};
-
-/**
- * Pull transactions from Supabase. Scoped to a single business_type
- * when provided so switching business mode never merges another
- * business's sales into the active one's view.
+ * Pull transactions from Supabase
  */
 export const fetchTransactionsFromSupabase = async (
-  shopId?: string,
-  businessType?: string
+  shopId?: string
 ): Promise<Transaction[] | null> => {
   const client = getSupabase();
   if (!client) return null;
@@ -497,9 +524,6 @@ export const fetchTransactionsFromSupabase = async (
     let query = client.from('pos_transactions').select('*').order('id', { ascending: false });
     if (shopId) {
       query = query.eq('shop_id', shopId);
-    }
-    if (businessType) {
-      query = query.eq('business_type', businessType);
     }
     const { data, error } = await query;
     if (error || !data) {
@@ -526,7 +550,6 @@ export const fetchTransactionsFromSupabase = async (
       staff: row.staff,
       notes: row.notes || undefined,
       status: row.status,
-      businessType: row.business_type || undefined,
     }));
   } catch (err) {
     console.warn('Error fetching from Supabase:', err);

@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import {
   TenantAccount,
   SubscriptionPlan,
@@ -81,7 +80,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   onExitAdmin,
   onSelectShopToView,
 }) => {
-  const { userEmail } = useAuth();
   const [tenants, setTenants] = useState<TenantAccount[]>(() => getTenants());
   const [auditLog, setAuditLog] = useState<SubscriptionAuditEntry[]>(() => getSubscriptionAuditLog());
   const [plans, setPlans] = useState<SubscriptionPlanConfig[]>(() => getSaaSPlans());
@@ -167,16 +165,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     if (result.success) {
       setSession(getSuperAdminSession());
       refreshData();
-    } else if (result.notAnAdmin) {
-      // The mount-time check said this account WAS an admin, but the
-      // fresh check just now says it isn't (session changed under us,
-      // wrong Supabase project, or a transient RLS/network hiccup).
-      // Re-sync accessCheck to the true current state instead of
-      // leaving the "choose a PIN" form up alongside a contradictory
-      // error - that combination is confusing and makes the bug look
-      // worse than it is.
-      setAccessCheck({ isAdmin: false, hasPinSet: false });
-      setLoginError('');
     } else {
       setLoginError(result.message);
     }
@@ -382,13 +370,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 real row in the <code className="bg-slate-800 px-1 py-0.5 rounded">super_admins</code> table can
                 access this dashboard - ask the platform owner to add you.
               </p>
-              {userEmail && (
-                <p className="text-rose-300/60 text-[11px] leading-relaxed pt-1 border-t border-rose-900/50">
-                  Checked account: <span className="font-mono">{userEmail}</span>. If this isn't the account you
-                  expected, sign out and back in as the right one, and double-check this deployment's Supabase
-                  project matches the one where that account was added to <code>super_admins</code>.
-                </p>
-              )}
             </div>
           ) : (
             <form onSubmit={handleAdminLogin} className="space-y-4">
@@ -1345,30 +1326,19 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   Business Type *
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(
-                    [
-                      { value: 'cyber', label: 'Cyber Café' },
-                      { value: 'electronics', label: 'Electronics' },
-                      { value: 'general_shop', label: 'General Shop' },
-                      { value: 'gas', label: 'Gas' },
-                      { value: 'clothing', label: 'Boutique' },
-                      { value: 'restaurant', label: 'Kitchen & Diners' },
-                      { value: 'pharmacy', label: 'Clinical & Health' },
-                      { value: 'other', label: 'Customisable' },
-                      { value: 'all', label: 'All-in-One' },
-                    ] as { value: BusinessMode; label: string }[]
-                  ).map((opt) => (
+                  {industryPlans.map((opt) => (
                     <button
-                      key={opt.value}
+                      key={opt.id}
                       type="button"
-                      onClick={() => setNewShopForm({ ...newShopForm, businessType: opt.value })}
-                      className={`px-2.5 py-2 rounded-lg text-[11px] font-bold border transition-all ${
-                        newShopForm.businessType === opt.value
+                      onClick={() => setNewShopForm({ ...newShopForm, businessType: opt.id })}
+                      className={`px-2.5 py-2 rounded-lg text-[11px] font-bold border transition-all flex items-center gap-1.5 justify-center ${
+                        newShopForm.businessType === opt.id
                           ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
                           : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-500'
                       }`}
                     >
-                      {opt.label}
+                      <span>{opt.emoji}</span>
+                      <span>{opt.shortName}</span>
                     </button>
                   ))}
                 </div>

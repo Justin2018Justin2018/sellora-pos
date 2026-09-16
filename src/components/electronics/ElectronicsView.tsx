@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { ElectronicsProduct, Transaction } from '../../types/pos';
 import { electronicsSaleToTransaction } from '../../utils/electronicsReceiptAdapter';
+import { BarcodeScannerModal } from '../common/BarcodeScannerModal';
 
 interface ElectronicsViewProps {
   onSaleCompleted?: (tx: Transaction) => void;
@@ -51,6 +52,7 @@ export const ElectronicsView: React.FC<ElectronicsViewProps> = ({ onSaleComplete
   const [salePaid, setSalePaid] = useState<number>(0);
   const [saleDiscount, setSaleDiscount] = useState<number>(0);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // Add Product Form State
   const [newProdName, setNewProdName] = useState('');
@@ -96,8 +98,8 @@ export const ElectronicsView: React.FC<ElectronicsViewProps> = ({ onSaleComplete
   }, [electronicsProducts, searchQuery]);
 
   // Handle barcode quick search
-  const handleBarcodeLookup = () => {
-    const code = barcodeInput.trim().toUpperCase();
+  const handleBarcodeLookup = (explicitCode?: string) => {
+    const code = (explicitCode ?? barcodeInput).trim().toUpperCase();
     if (!code) return;
     const match = electronicsProducts.find(
       (p) =>
@@ -326,6 +328,14 @@ export const ElectronicsView: React.FC<ElectronicsViewProps> = ({ onSaleComplete
                   className="px-3 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shrink-0"
                 >
                   Lookup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(true)}
+                  title="Scan with camera"
+                  className="px-2.5 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white shrink-0"
+                >
+                  <Camera className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -739,6 +749,17 @@ export const ElectronicsView: React.FC<ElectronicsViewProps> = ({ onSaleComplete
           </div>
         </form>
       </div>
+
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={(code) => {
+          setBarcodeInput(code);
+          setIsScannerOpen(false);
+          handleBarcodeLookup(code);
+        }}
+        title="Scan Product Barcode"
+      />
     </div>
   );
 };

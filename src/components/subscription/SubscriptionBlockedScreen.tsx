@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { TenantAccount } from '../../types/pos';
+import { useAuth } from '../../context/AuthContext';
+import { getBusinessTypeConfig } from '../../data/businessTypes';
 import {
   ShieldAlert,
   Lock,
@@ -34,6 +36,9 @@ export const SubscriptionBlockedScreen: React.FC<SubscriptionBlockedScreenProps>
   const [adminUsername, setAdminUsername] = useState('superadmin');
   const [adminPassword, setAdminPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+
+  const { memberships, shopId: activeShopId, switchActiveBusiness } = useAuth();
+  const otherActiveBusinesses = memberships.filter((m) => m.status === 'ACTIVE' && m.shopId !== activeShopId);
 
   const isExpired = tenant.status === 'EXPIRED';
   const isSuspended = tenant.status === 'SUSPENDED';
@@ -211,6 +216,32 @@ export const SubscriptionBlockedScreen: React.FC<SubscriptionBlockedScreenProps>
               <span>Call Admin: {adminPhone}</span>
             </a>
           </div>
+
+          {/* If this customer has other ACTIVE businesses, this specific
+              one being blocked shouldn't lock them out of those too. */}
+          {otherActiveBusinesses.length > 0 && (
+            <div className="mt-6 p-4 rounded-2xl bg-emerald-950/30 border border-emerald-900/50">
+              <p className="text-xs font-bold text-emerald-300 mb-2.5 flex items-center gap-1.5">
+                <Store className="w-3.5 h-3.5" />
+                <span>You still have access to your other businesses:</span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {otherActiveBusinesses.map((m) => {
+                  const config = getBusinessTypeConfig(m.businessType as any);
+                  return (
+                    <button
+                      key={m.shopId}
+                      onClick={() => switchActiveBusiness(m.shopId)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-800/50 text-emerald-200 text-xs font-semibold transition-colors"
+                    >
+                      <span>{config.emoji}</span>
+                      <span>{m.shopName}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Secondary Details & Controls */}
           <div className="mt-6 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400 pt-4 border-t border-slate-800/60">

@@ -13,9 +13,11 @@ import {
   Smartphone,
   Tag,
   AlertTriangle,
+  Camera,
   X
 } from 'lucide-react';
 import { GeneralProduct, PaymentMethod, Transaction } from '../../types/pos';
+import { BarcodeScannerModal } from '../common/BarcodeScannerModal';
 import { executeReceiptPrint, openReceiptInNewTab, generateBarcodeSvg } from '../../utils/printReceipt';
 
 export const GeneralSaleView: React.FC = () => {
@@ -29,6 +31,7 @@ export const GeneralSaleView: React.FC = () => {
   } = usePOS();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [cart, setCart] = useState<Array<{ product: GeneralProduct; qty: number }>>([]);
   const [customerName, setCustomerName] = useState('Walk-in Customer');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -259,6 +262,14 @@ export const GeneralSaleView: React.FC = () => {
               className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => setIsScannerOpen(true)}
+            title="Scan with camera"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white shrink-0"
+          >
+            <Camera className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto pr-1">
@@ -648,6 +659,16 @@ export const GeneralSaleView: React.FC = () => {
           </div>
         </div>
       )}
+
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={(code) => {
+          setSearchQuery(code);
+          setIsScannerOpen(false);
+        }}
+        title="Scan Product Barcode"
+      />
     </div>
   );
 };
