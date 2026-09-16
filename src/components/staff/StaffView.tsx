@@ -13,12 +13,15 @@ import {
   Users
 } from 'lucide-react';
 import { UserRole } from '../../types/pos';
+import { generalSaleToTransaction } from '../../utils/generalSaleAdapter';
 
 export const StaffView: React.FC = () => {
   const {
     currentUser,
     switchUser,
+    businessMode,
     transactions,
+    generalSales,
     expenses,
     familyExpenses,
     formatMoney,
@@ -33,11 +36,18 @@ export const StaffView: React.FC = () => {
   // Filter today's figures
   const todayKey = new Date().toISOString().slice(0, 10);
 
+  // Cashiers ring sales through the service ledger in cyber mode and through
+  // the product POS everywhere else — the drawer must reconcile either way.
+  const salesLedger = useMemo(
+    () => (businessMode === 'cyber' ? transactions : generalSales.map(generalSaleToTransaction)),
+    [businessMode, transactions, generalSales]
+  );
+
   const shiftStats = useMemo(() => {
     let todayCashSales = 0;
     let todayMpesaSales = 0;
 
-    transactions.forEach((t) => {
+    salesLedger.forEach((t) => {
       if (t.status === 'cancelled' || t.date.slice(0, 10) !== todayKey) return;
       if (t.payment === 'Cash') todayCashSales += t.total;
       if (t.payment === 'M-Pesa') todayMpesaSales += t.total;
@@ -64,13 +74,13 @@ export const StaffView: React.FC = () => {
       expectedCashInDrawer,
       difference,
     };
-  }, [transactions, expenses, familyExpenses, openingFloat, actualCashCount, todayKey]);
+  }, [salesLedger, expenses, familyExpenses, openingFloat, actualCashCount, todayKey]);
 
   // Cashier performance
   const staffPerformance = useMemo(() => {
     const map: Record<string, { salesCount: number; volume: number }> = {};
 
-    transactions.forEach((t) => {
+    salesLedger.forEach((t) => {
       if (t.status === 'cancelled') return;
       const s = t.staff || 'Cashier';
       if (!map[s]) map[s] = { salesCount: 0, volume: 0 };
@@ -79,7 +89,7 @@ export const StaffView: React.FC = () => {
     });
 
     return map;
-  }, [transactions]);
+  }, [salesLedger]);
 
   return (
     <div className="space-y-6">

@@ -12,18 +12,27 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { FamilyExpense } from '../../types/pos';
+import { generalSaleToTransaction } from '../../utils/generalSaleAdapter';
 
 export const FamilyFinanceView: React.FC = () => {
   const {
     familyExpenses,
     addFamilyExpense,
     deleteFamilyExpense,
+    businessMode,
     transactions,
+    generalSales,
     expenses,
     formatMoney,
     hasRole,
     addToast,
   } = usePOS();
+
+  // Whichever ledger this business type actually sells through.
+  const salesLedger = useMemo(
+    () => (businessMode === 'cyber' ? transactions : generalSales.map(generalSaleToTransaction)),
+    [businessMode, transactions, generalSales]
+  );
 
   // Form State
   const [recipient, setRecipient] = useState('Home & Groceries');
@@ -55,18 +64,18 @@ export const FamilyFinanceView: React.FC = () => {
     });
 
     // Business net sales
-    const netSales = transactions
+    const netSales = salesLedger
       .filter((t) => t.status !== 'cancelled' && t.payment !== 'Credit / Debt')
       .reduce((sum, t) => sum + t.total, 0);
 
     const businessExpensesTotal = expenses.reduce((sum, e) => sum + e.amount, 0);
-    const businessMaterialTotal = transactions.reduce((sum, t) => sum + (t.materialTotal || 0), 0);
+    const businessMaterialTotal = salesLedger.reduce((sum, t) => sum + (t.materialTotal || 0), 0);
     const trueNetBusinessProfit = netSales - businessExpensesTotal - businessMaterialTotal;
 
     const remainingRetainedCapital = trueNetBusinessProfit - totalAllTime;
 
     return { totalAllTime, totalThisMonth, trueNetBusinessProfit, remainingRetainedCapital };
-  }, [familyExpenses, transactions, expenses]);
+  }, [familyExpenses, salesLedger, expenses]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

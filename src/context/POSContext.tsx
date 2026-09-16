@@ -251,7 +251,7 @@ interface POSContextType {
 
   generalSales: GeneralSale[];
   recordGeneralSale: (sale: Omit<GeneralSale, 'id' | 'date' | 'receipt'>) => GeneralSale | null;
-  deleteGeneralSale: (id: number) => boolean;
+  deleteGeneralSale: (id: number, password?: string) => boolean;
 
   // Helpers
   formatMoney: (amount: number) => string;
@@ -868,12 +868,24 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return newSale;
-  }, [generalSales.length]);
+  }, [businessMode, activeSales.length]);
 
-  const deleteGeneralSale = useCallback((id: number) => {
-    setGeneralSales((prev) => prev.filter((s) => s.id !== id));
+  const deleteGeneralSale = useCallback((id: number, password?: string) => {
+    // Password path is used by the P&L ledger; the plain path stays available
+    // to in-module callers that already gate on role.
+    if (password !== undefined && !verifyAdminPassword(password)) {
+      addToast({
+        type: 'error',
+        title: 'Incorrect Password',
+        message: 'The entered admin password is incorrect. Deletion denied.',
+      });
+      return false;
+    }
+    // Must clear from the CURRENT business type's sales, not always the
+    // general_shop bucket — otherwise restaurant/bar/pharmacy deletes no-op.
+    setActiveSales((prev) => prev.filter((s) => s.id !== id));
     return true;
-  }, []);
+  }, [businessMode, setActiveSales]);
   const [expenses, setExpenses] = useState<Expense[]>(() => {
     const tid = getCurrentTenantId();
     return safeStorageGet(getTenantKeyStatic(tid, 'expenses'), isPrimaryTenantId(tid) ? INITIAL_EXPENSES : []);

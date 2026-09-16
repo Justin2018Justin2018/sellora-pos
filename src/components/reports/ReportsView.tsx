@@ -33,6 +33,9 @@ import {
 } from 'lucide-react';
 import { DeleteTransactionModal, DeletableItemDetails } from '../common/DeleteTransactionModal';
 import { executeShiftReportPrint, openShiftReportInNewTab } from '../../utils/printReceipt';
+import { getRevenueStreams, RevenueStreamKey } from '../../data/reportStreams';
+
+type LedgerFilter = RevenueStreamKey | 'all' | 'expense' | 'family';
 
 interface ReportsViewProps {
   onOpenReceipt?: (tx: Transaction) => void;
@@ -41,9 +44,11 @@ interface ReportsViewProps {
 export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
   const {
     profile,
+    businessMode,
     transactions,
     gasTransactions,
     electronicsSales,
+    generalSales,
     expenses,
     familyExpenses,
     formatMoney,
@@ -52,8 +57,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     addToast,
   } = usePOS();
 
+  // Revenue lines this business type should actually see. A restaurant must
+  // not be shown cyber/gas/electronics lines, and its product POS sales
+  // (generalSales) must not be silently dropped from the P&L.
+  const streams = useMemo(() => getRevenueStreams(businessMode), [businessMode]);
+  const activeStreamKeys = useMemo(() => streams.map((s) => s.key), [streams]);
+  const hasStream = (key: RevenueStreamKey) => activeStreamKeys.includes(key);
+  const generalStreamLabel = useMemo(
+    () => streams.find((s) => s.key === 'general')?.tabLabel || 'Retail Sales',
+    [streams]
+  );
+
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('month');
-  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'cyber' | 'gas' | 'electronics' | 'expense' | 'family'>('all');
+  const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>('all');
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [itemToDelete, setItemToDelete] = useState<DeletableItemDetails | null>(null);
   const [expenseToEdit, setExpenseToEdit] = useState<Expense | null>(null);
@@ -113,33 +129,56 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     return { start, end };
   }, [period]);
 
-  // Cyber Sales
+  // Cyber Sales — only counted when this business type runs the cyber module
   const periodCyberSales = useMemo(() => {
+    if (!hasStream('cyber')) return [];
     return transactions.filter((t) => {
       if (t.status === 'cancelled' || t.payment === 'Credit / Debt') return false;
       if (!dateRange) return true;
       const d = new Date(t.date);
       return d >= dateRange.start && d <= dateRange.end;
     });
-  }, [transactions, dateRange]);
+  }, [transactions, dateRange, activeStreamKeys]);
 
   // Gas Sales
   const periodGasSales = useMemo(() => {
+    if (!hasStream('gas')) return [];
     return gasTransactions.filter((g) => {
       if (!dateRange) return true;
       const d = new Date(g.date);
       return d >= dateRange.start && d <= dateRange.end;
     });
-  }, [gasTransactions, dateRange]);
+  }, [gasTransactions, dateRange, activeStreamKeys]);
 
   // Electronics Sales
   const periodElectronicsSales = useMemo(() => {
+    if (!hasStream('electronics')) return [];
     return electronicsSales.filter((e) => {
       if (!dateRange) return true;
       const d = new Date(e.date);
       return d >= dateRange.start && d <= dateRange.end;
     });
-  }, [electronicsSales, dateRange]);
+  }, [electronicsSales, dateRange, activeStreamKeys]);
+
+  // Product POS sales — this is where restaurant, bar, pharmacy, clothing,
+  // shop, guest house and "other" record every single sale they make.
+  const periodGeneralSales = useMemo(() => {
+    if (!hasStream('general')) return [];
+    return generalSales.filter((s) => {
+      if (s.status === 'cancelled') return false;
+      if (!dateRange) return true;
+      const d = new Date(s.date.includes('T') ? s.date : s.date + 'T00:00:00');
+      return d >= dateRange.start && d <= dateRange.end;
+    });
+  }, [generalSales, dateRange, activeStreamKeys]);
+
+  /** COGS for a product sale: prefer recorded item buying prices, fall back to total - profit. */
+  const generalSaleCost = (s: { items?: { buyingPrice?: number; qty: number }[]; total: number; profit?: number }) => {
+    if (s.items && s.items.length > 0) {
+      return s.items.reduce((sum, i) => sum + (i.buyingPrice || 0) * (i.qty || 0), 0);
+    }
+    return Math.max(0, s.total - (s.profit || 0));
+  };
 
   // Expenses
   const periodExpenses = useMemo(() => {
@@ -170,8 +209,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     const elRev = periodElectronicsSales.reduce((sum, e) => sum + e.total, 0);
     const elCost = periodElectronicsSales.reduce((sum, e) => sum + (e.cost || 0), 0);
 
-    const totalGrossRevenue = cyberRev + gasRev + elRev;
-    const totalMaterialsCost = cyberCost + gasCost + elCost;
+    const genRev = periodGeneralSales.reduce((sum, s) => sum + s.total, 0);
+    const genCost = periodGeneralSales.reduce((sum, s) => sum + generalSaleCost(s), 0);
+
+    const totalGrossRevenue = cyberRev + gasRev + elRev + genRev;
+    const totalMaterialsCost = cyberCost + gasCost + elCost + genCost;
     const grossProfit = totalGrossRevenue - totalMaterialsCost;
 
     const totalOperatingExpenses = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -189,6 +231,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
       gasCost,
       elRev,
       elCost,
+      genRev,
+      genCost,
+      byStream: {
+        cyber: { revenue: cyberRev, cost: cyberCost, count: periodCyberSales.length },
+        gas: { revenue: gasRev, cost: gasCost, count: periodGasSales.length },
+        electronics: { revenue: elRev, cost: elCost, count: periodElectronicsSales.length },
+        general: { revenue: genRev, cost: genCost, count: periodGeneralSales.length },
+      } as Record<RevenueStreamKey, { revenue: number; cost: number; count: number }>,
       totalGrossRevenue,
       totalMaterialsCost,
       grossProfit,
@@ -198,7 +248,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
       finalRetainedEarnings,
       profitMargin,
     };
-  }, [periodCyberSales, periodGasSales, periodElectronicsSales, periodExpenses, periodFamily]);
+  }, [periodCyberSales, periodGasSales, periodElectronicsSales, periodGeneralSales, periodExpenses, periodFamily]);
 
   // Payment Breakdown
   const paymentBreakdown = useMemo(() => {
@@ -212,14 +262,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     periodElectronicsSales.forEach((e) => {
       map[e.payment] = (map[e.payment] || 0) + e.total;
     });
+    periodGeneralSales.forEach((s) => {
+      map[s.payment] = (map[s.payment] || 0) + s.total;
+    });
     return map;
-  }, [periodCyberSales, periodGasSales, periodElectronicsSales]);
+  }, [periodCyberSales, periodGasSales, periodElectronicsSales, periodGeneralSales]);
 
   // Unified P&L Contributing Ledger Entries
   const ledgerEntries = useMemo(() => {
     const list: Array<{
       id: string | number;
-      type: 'cyber' | 'gas' | 'electronics' | 'expense' | 'family';
+      type: LedgerFilter;
       receipt: string;
       date: string;
       category: string;
@@ -284,6 +337,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
       });
     });
 
+    periodGeneralSales.forEach((s) => {
+      const itemsList =
+        s.items && s.items.length > 0
+          ? s.items.map((i) => `${i.qty}x ${i.productName}`).join(', ')
+          : 'Product sale';
+      list.push({
+        id: s.id,
+        type: 'general',
+        receipt: s.receipt,
+        date: s.date,
+        category: generalStreamLabel,
+        desc: itemsList,
+        party: s.customer || 'Walk-in Customer',
+        payment: s.payment || 'Cash',
+        grossAmount: s.total,
+        cogsAmount: generalSaleCost(s),
+        netImpact: s.total - generalSaleCost(s),
+        raw: s,
+      });
+    });
+
     periodExpenses.forEach((exp) => {
       list.push({
         id: exp.id,
@@ -324,7 +398,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
       const timeB = new Date(b.date.includes('T') ? b.date : b.date + 'T00:00:00').getTime();
       return timeB - timeA;
     });
-  }, [periodCyberSales, periodGasSales, periodElectronicsSales, periodExpenses, periodFamily]);
+  }, [periodCyberSales, periodGasSales, periodElectronicsSales, periodGeneralSales, periodExpenses, periodFamily, generalStreamLabel]);
 
   // Filtered Ledger
   const filteredLedger = useMemo(() => {
@@ -403,7 +477,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     });
   };
 
-  const scrollToLedger = (filterType: 'all' | 'cyber' | 'gas' | 'electronics' | 'expense' | 'family') => {
+  const scrollToLedger = (filterType: LedgerFilter) => {
     setLedgerFilter(filterType);
     if (ledgerTableRef.current) {
       ledgerTableRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -463,12 +537,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
                     card: (paymentBreakdown.Card || 0) + (paymentBreakdown.Bank || 0),
                     debt: paymentBreakdown['Credit / Debt'] || 0,
                   },
-                  categoryBreakdown: [
-                    { name: 'Cyber & POS', amount: pnl.cyberRev },
-                    { name: 'Cooking Gas (LPG)', amount: pnl.gasRev },
-                    { name: 'Electronics & Repairs', amount: pnl.elRev },
-                  ].filter((c) => c.amount > 0),
-                  transactionCount: periodCyberSales.length + periodGasSales.length + periodElectronicsSales.length,
+                  categoryBreakdown: streams
+                    .map((s) => ({ name: s.tabLabel, amount: pnl.byStream[s.key].revenue }))
+                    .filter((c) => c.amount > 0),
+                  transactionCount:
+                    periodCyberSales.length +
+                    periodGasSales.length +
+                    periodElectronicsSales.length +
+                    periodGeneralSales.length,
                 });
               }}
               className="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition-all shadow-md active:scale-95"
@@ -506,12 +582,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
                     card: (paymentBreakdown.Card || 0) + (paymentBreakdown.Bank || 0),
                     debt: paymentBreakdown['Credit / Debt'] || 0,
                   },
-                  categoryBreakdown: [
-                    { name: 'Cyber & POS', amount: pnl.cyberRev },
-                    { name: 'Cooking Gas (LPG)', amount: pnl.gasRev },
-                    { name: 'Electronics & Repairs', amount: pnl.elRev },
-                  ].filter((c) => c.amount > 0),
-                  transactionCount: periodCyberSales.length + periodGasSales.length + periodElectronicsSales.length,
+                  categoryBreakdown: streams
+                    .map((s) => ({ name: s.tabLabel, amount: pnl.byStream[s.key].revenue }))
+                    .filter((c) => c.amount > 0),
+                  transactionCount:
+                    periodCyberSales.length +
+                    periodGasSales.length +
+                    periodElectronicsSales.length +
+                    periodGeneralSales.length,
                 });
               }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all"
@@ -631,47 +709,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
             </div>
 
             <div className="space-y-2.5 pl-4 border-l-2 border-blue-200 dark:border-blue-900">
-              <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
-                <div className="flex items-center gap-2">
-                  <span>Cyber, Printing & Photocopy Services:</span>
-                  <button
-                    onClick={() => scrollToLedger('cyber')}
-                    className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200/80 dark:border-blue-800 hover:bg-blue-100 transition-colors"
-                    title="Filter ledger to cyber sales"
-                  >
-                    {periodCyberSales.length} sales
-                  </button>
+              {streams.map((stream) => (
+                <div key={stream.key} className="flex items-center justify-between text-slate-700 dark:text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <span>{stream.revenueLabel}:</span>
+                    <button
+                      onClick={() => scrollToLedger(stream.key)}
+                      className={stream.pillClass}
+                      title={`Filter ledger to ${stream.tabLabel.toLowerCase()} records`}
+                    >
+                      {pnl.byStream[stream.key].count} {stream.unitLabel}
+                    </button>
+                  </div>
+                  <span className="font-mono font-semibold">{formatMoney(pnl.byStream[stream.key].revenue)}</span>
                 </div>
-                <span className="font-mono font-semibold">{formatMoney(pnl.cyberRev)}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
-                <div className="flex items-center gap-2">
-                  <span>Gas Cylinder Refills & Sales:</span>
-                  <button
-                    onClick={() => scrollToLedger('gas')}
-                    className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/80 dark:border-amber-800 hover:bg-amber-100 transition-colors"
-                    title="Filter ledger to gas refill records"
-                  >
-                    {periodGasSales.length} refills
-                  </button>
-                </div>
-                <span className="font-mono font-semibold">{formatMoney(pnl.gasRev)}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
-                <div className="flex items-center gap-2">
-                  <span>Electronics & Phone Accessories:</span>
-                  <button
-                    onClick={() => scrollToLedger('electronics')}
-                    className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/80 dark:border-purple-800 hover:bg-purple-100 transition-colors"
-                    title="Filter ledger to electronics sales"
-                  >
-                    {periodElectronicsSales.length} sales
-                  </button>
-                </div>
-                <span className="font-mono font-semibold">{formatMoney(pnl.elRev)}</span>
-              </div>
+              ))}
 
               <div className="flex justify-between pt-2 border-t border-slate-200 dark:border-slate-800 font-black text-slate-900 dark:text-white">
                 <span>TOTAL GROSS REVENUE:</span>
@@ -686,18 +738,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
               <span>2. Cost of Sales & Direct Consumables (COGS)</span>
             </h4>
             <div className="space-y-2 pl-4 border-l-2 border-amber-200 dark:border-amber-900">
-              <div className="flex justify-between text-slate-700 dark:text-slate-300">
-                <span>Paper, Toner, Laminating Pouches & Envelopes:</span>
-                <span className="font-mono text-rose-600">-{formatMoney(pnl.cyberCost)}</span>
-              </div>
-              <div className="flex justify-between text-slate-700 dark:text-slate-300">
-                <span>Wholesale Gas Refill Cylinder Purchases:</span>
-                <span className="font-mono text-rose-600">-{formatMoney(pnl.gasCost)}</span>
-              </div>
-              <div className="flex justify-between text-slate-700 dark:text-slate-300">
-                <span>Electronics Wholesale Inventory Purchases:</span>
-                <span className="font-mono text-rose-600">-{formatMoney(pnl.elCost)}</span>
-              </div>
+              {streams.map((stream) => (
+                <div key={stream.key} className="flex justify-between text-slate-700 dark:text-slate-300">
+                  <span>{stream.cogsLabel}:</span>
+                  <span className="font-mono text-rose-600">-{formatMoney(pnl.byStream[stream.key].cost)}</span>
+                </div>
+              ))}
               <div className="flex justify-between pt-2 border-t border-slate-200 dark:border-slate-800 font-black text-slate-900 dark:text-white">
                 <span>TOTAL MATERIAL & INVENTORY COSTS:</span>
                 <span className="font-mono text-base text-rose-600">-{formatMoney(pnl.totalMaterialsCost)}</span>
@@ -913,45 +959,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
                 {ledgerEntries.length}
               </span>
             </button>
-            <button
-              onClick={() => setLedgerFilter('cyber')}
-              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                ledgerFilter === 'cyber'
-                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <span>Cyber & POS</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
-                {periodCyberSales.length}
-              </span>
-            </button>
-            <button
-              onClick={() => setLedgerFilter('gas')}
-              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                ledgerFilter === 'gas'
-                  ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <span>Gas Refills</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300">
-                {periodGasSales.length}
-              </span>
-            </button>
-            <button
-              onClick={() => setLedgerFilter('electronics')}
-              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                ledgerFilter === 'electronics'
-                  ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <span>Electronics</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300">
-                {periodElectronicsSales.length}
-              </span>
-            </button>
+            {streams.map((stream) => (
+              <button
+                key={stream.key}
+                onClick={() => setLedgerFilter(stream.key)}
+                className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                  ledgerFilter === stream.key
+                    ? stream.tabActiveClass
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <span>{stream.tabLabel}</span>
+                <span className={stream.tabCountClass}>{pnl.byStream[stream.key].count}</span>
+              </button>
+            ))}
             <button
               onClick={() => setLedgerFilter('expense')}
               className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap flex items-center gap-1.5 ${
@@ -1054,20 +1075,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
                         {/* Type & Ref */}
                         <td className="py-3 px-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
-                            {entry.type === 'cyber' && (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800">
-                                Cyber
-                              </span>
-                            )}
-                            {entry.type === 'gas' && (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800">
-                                Gas
-                              </span>
-                            )}
-                            {entry.type === 'electronics' && (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400 border border-purple-200/60 dark:border-purple-800">
-                                Electronics
-                              </span>
+                            {streams.map(
+                              (stream) =>
+                                entry.type === stream.key && (
+                                  <span key={stream.key} className={stream.badgeClass}>
+                                    {stream.badgeLabel}
+                                  </span>
+                                )
                             )}
                             {entry.type === 'expense' && (
                               <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800">
