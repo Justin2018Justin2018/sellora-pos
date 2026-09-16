@@ -20,7 +20,6 @@ import {
   UserCog,
   Settings,
   Bot,
-  Printer,
   LogOut,
   X,
   Store,
@@ -58,7 +57,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     profile,
     currentShop,
     businessMode,
-    setBusinessMode,
     lowStockItems,
     debts,
     currentUser,
@@ -196,7 +194,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ];
     }
 
-    // Default for General Shop, Clothing, Restaurant, Pharmacy, Other
+    // Default for General Shop, Clothing, Restaurant, Pharmacy, Bar, Guest House, Other
     return [
       { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { key: 'sale', label: 'New Sale', icon: ShoppingCart },
@@ -304,57 +302,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <BusinessSwitcher />
         </div>
 
-        {/* Quick Switcher across Core Trades */}
-        <div className="mt-2.5 grid grid-cols-4 gap-1 text-[10px] font-bold">
-          <button
-            onClick={() => setBusinessMode('cyber')}
-            title="Switch to Cyber POS"
-            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
-              businessMode === 'cyber'
-                ? 'bg-blue-600 text-white shadow-sm font-black'
-                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Printer className="w-3 h-3" />
-            <span>Cyber</span>
-          </button>
-          <button
-            onClick={() => setBusinessMode('gas')}
-            title="Switch to Gas/LPG POS"
-            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
-              businessMode === 'gas'
-                ? 'bg-amber-600 text-white shadow-sm font-black'
-                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Fuel className="w-3 h-3" />
-            <span>Gas</span>
-          </button>
-          <button
-            onClick={() => setBusinessMode('electronics')}
-            title="Switch to Tech/Electronics POS"
-            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
-              businessMode === 'electronics'
-                ? 'bg-purple-600 text-white shadow-sm font-black'
-                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Smartphone className="w-3 h-3" />
-            <span>Tech</span>
-          </button>
-          <button
-            onClick={() => setBusinessMode('general_shop')}
-            title="Switch to General Shop POS"
-            className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors cursor-pointer ${
-              businessMode === 'general_shop'
-                ? 'bg-emerald-600 text-white shadow-sm font-black'
-                : 'bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <ShoppingCart className="w-3 h-3" />
-            <span>Shop</span>
-          </button>
-        </div>
       </div>
 
       {/* Nav List */}
