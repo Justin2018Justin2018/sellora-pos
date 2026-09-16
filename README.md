@@ -22,4 +22,11 @@ Run, in order, in the Supabase SQL Editor:
 1. `supabase-schema.sql`
 2. `supabase-schema-v2-security-fix.sql`
 3. `supabase-schema-v3-claim-shop-fix.sql`
+4. `supabase-schema-v6-mpesa-transactions.sql` (only if you're using M-Pesa STK Push — see `MPESA_SETUP.md`)
+
+## M-Pesa (Daraja) integration
+
+Real M-Pesa STK Push requires a couple of one-time deployment steps
+(Supabase Edge Functions + secrets) beyond the frontend env vars above.
+See `MPESA_SETUP.md` for the full walkthrough.
 

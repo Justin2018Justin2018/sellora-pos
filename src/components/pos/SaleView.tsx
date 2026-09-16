@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { PaymentMethod, ServiceLineItem, Transaction } from '../../types/pos';
+import { isMpesaAvailable } from '../../services/mpesaService';
 
 interface SaleViewProps {
   initialService?: string;
@@ -35,7 +36,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
     recordCyberSale,
     customers,
     formatMoney,
-    simulateStkPush,
+    triggerMpesaStkPush,
     addToast,
     profile,
     taxRules,
@@ -68,6 +69,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
   const [amountPaid, setAmountPaid] = useState<number>(0);
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [isStkPushing, setIsStkPushing] = useState(false);
+  const [stkSecondsLeft, setStkSecondsLeft] = useState<number | null>(null);
   const [mpesaReceiptCode, setMpesaReceiptCode] = useState('');
 
   // Initialize with initial service or first service
@@ -217,15 +219,20 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
     }
   };
 
-  // Trigger simulated M-Pesa STK Push
+  // Trigger a real M-Pesa STK Push (Daraja, via Supabase edge functions)
   const handleTriggerStkPush = async () => {
     if (!customerPhone) {
       addToast({ type: 'warning', title: 'Phone Required', message: 'Enter customer M-Pesa phone number first.' });
       return;
     }
     setIsStkPushing(true);
+    setStkSecondsLeft(90);
+    const countdown = setInterval(() => {
+      setStkSecondsLeft((s) => (s === null ? null : Math.max(0, s - 1)));
+    }, 1000);
+
     try {
-      const res = await simulateStkPush(customerPhone, totals.total, `${profile.name || 'Sellora'} Sale`);
+      const res = await triggerMpesaStkPush(customerPhone, totals.total, `${profile.name || 'Sellora'} Sale`);
       if (res.success) {
         setPaymentMethod('M-Pesa');
         setAmountPaid(totals.total);
@@ -235,11 +242,15 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
           title: 'M-Pesa Confirmed!',
           message: `Receipt: ${res.mpesaReceipt}. Payment of ${formatMoney(totals.total)} received.`,
         });
+      } else {
+        addToast({ type: 'error', title: 'STK Push Not Completed', message: res.error || 'Payment was not confirmed.' });
       }
     } catch (e: any) {
-      addToast({ type: 'error', title: 'STK Push Failed', message: e.message });
+      addToast({ type: 'error', title: 'STK Push Failed', message: e.message || 'Unexpected error contacting M-Pesa.' });
     } finally {
+      clearInterval(countdown);
       setIsStkPushing(false);
+      setStkSecondsLeft(null);
     }
   };
 
@@ -338,6 +349,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
       profit: totals.profit,
       payment: paymentMethod,
       stockUsed: stockUsedList,
+      notes: paymentMethod === 'M-Pesa' && mpesaReceiptCode.trim() ? `M-Pesa Code: ${mpesaReceiptCode.trim()}` : undefined,
     });
 
     // Confetti celebration
@@ -355,6 +367,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
     setCustomerIdNumber('');
     setCustomerAddress('');
     setPaymentMethod('Cash');
+    setMpesaReceiptCode('');
     setDiscountInput(0);
     setCartRows([
       {
@@ -376,6 +389,7 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
     setCustomerIdNumber('');
     setCustomerAddress('');
     setPaymentMethod('Cash');
+    setMpesaReceiptCode('');
     setDiscountInput(0);
     setCartRows([
       {
@@ -674,31 +688,64 @@ export const SaleView: React.FC<SaleViewProps> = ({ initialService, onSaleComple
                   <Coins className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Daraja STK Push</span>
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100 font-bold uppercase">
-                  Ready
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                    isMpesaAvailable()
+                      ? 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100'
+                      : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100'
+                  }`}
+                >
+                  {isMpesaAvailable() ? 'Ready' : 'Not Connected'}
                 </span>
               </div>
-              <p className="text-[11px] text-emerald-700 dark:text-emerald-300 leading-relaxed mb-3">
-                Send payment request prompt directly to customer's mobile phone:
-              </p>
-              <button
-                type="button"
-                onClick={handleTriggerStkPush}
-                disabled={isStkPushing}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all disabled:opacity-50"
-              >
-                {isStkPushing ? (
-                  <>
-                    <Clock className="w-3.5 h-3.5 animate-spin" />
-                    <span>Prompting Customer's Phone...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Send STK Prompt ({formatMoney(totals.total)})</span>
-                  </>
-                )}
-              </button>
+              {isMpesaAvailable() ? (
+                <>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300 leading-relaxed mb-3">
+                    Send payment request prompt directly to customer's mobile phone:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleTriggerStkPush}
+                    disabled={isStkPushing}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all disabled:opacity-50"
+                  >
+                    {isStkPushing ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                        <span>
+                          Waiting for customer to enter PIN{stkSecondsLeft !== null ? ` (${stkSecondsLeft}s)` : '...'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Send STK Prompt ({formatMoney(totals.total)})</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-[10px] text-emerald-700/70 dark:text-emerald-300/70 mt-2">
+                    Or record the M-Pesa code manually below if the customer already paid.
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+                  Connect Supabase (Settings → Cloud Sync) to enable automatic STK push. Until then, select
+                  M-Pesa and record the payment manually using the M-Pesa code the customer reads out to you.
+                </p>
+              )}
+
+              <div className="mt-3 pt-3 border-t border-emerald-200 dark:border-emerald-800/60">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">
+                  M-Pesa Confirmation Code
+                </label>
+                <input
+                  type="text"
+                  value={mpesaReceiptCode}
+                  onChange={(e) => setMpesaReceiptCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. NLJ7X8Y2ZQ"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold uppercase tracking-wider"
+                />
+              </div>
             </div>
           )}
 

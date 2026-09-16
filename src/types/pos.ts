@@ -417,14 +417,13 @@ export interface SalaryPayment {
   staff: string;
 }
 
+// NOTE: Consumer Key/Secret and Passkey are intentionally NOT part of this
+// type. Real Daraja credentials must never be stored in the browser or
+// localStorage - they live only as Supabase Edge Function secrets (see
+// MPESA_SETUP.md). This config is informational/display-only for staff.
 export interface MpesaConfig {
-  consumerKey: string;
-  consumerSecret: string;
-  passkey: string;
-  shortcode: string;
   tillNumber: string;
   environment: 'sandbox' | 'production';
-  backendUrl?: string;
 }
 
 export interface ChatMessage {

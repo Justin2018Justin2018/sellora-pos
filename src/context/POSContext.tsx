@@ -35,6 +35,7 @@ import {
 import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
 import { enqueueSync, processSyncQueue } from '../services/syncEngine';
 import { checkRealConnectivity } from '../services/connectivity';
+import { initiateStkPush, pollStkStatus } from '../services/mpesaService';
 import {
   getCurrentTenantId,
   setCurrentTenantId,
@@ -202,7 +203,7 @@ interface POSContextType {
   // M-Pesa Integration
   mpesaConfig: MpesaConfig;
   updateMpesaConfig: (updates: Partial<MpesaConfig>) => void;
-  simulateStkPush: (phone: string, amount: number, description: string) => Promise<{ success: boolean; mpesaReceipt?: string; error?: string }>;
+  triggerMpesaStkPush: (phone: string, amount: number, description: string) => Promise<{ success: boolean; mpesaReceipt?: string; error?: string }>;
 
   // Audit Log & Backup
   auditLog: AuditEntry[];
@@ -921,13 +922,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
   const [mpesaConfig, setMpesaConfig] = useState<MpesaConfig>(() =>
     safeStorageGet('mj_pos_mpesa_config', {
-      consumerKey: '',
-      consumerSecret: '',
-      passkey: '',
-      shortcode: '174379',
-      tillNumber: '522522',
+      tillNumber: '',
       environment: 'sandbox',
-      backendUrl: '/api/mpesa'
     })
   );
 
@@ -2534,28 +2530,49 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
-  // M-Pesa Configuration & Simulation
+  // M-Pesa Configuration & Real Daraja STK Push
   const updateMpesaConfig = (updates: Partial<MpesaConfig>) => {
     setMpesaConfig((prev) => ({ ...prev, ...updates }));
     logAudit('MPESA_CONFIG', 'Updated Daraja M-Pesa API settings.');
     addToast({ type: 'success', title: 'M-Pesa Settings Saved' });
   };
 
-  const simulateStkPush = async (
+  const triggerMpesaStkPush = async (
     phone: string,
     amount: number,
     description: string
   ): Promise<{ success: boolean; mpesaReceipt?: string; error?: string }> => {
     logAudit('STK_PUSH_TRIGGER', `Triggered STK push of ${formatMoney(amount)} to ${phone}`);
-    // Simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    // In sandbox or demo mode, simulate 95% success
-    const mpesaReceipt = `NL${Math.floor(100000000 + Math.random() * 900000000).toString()}`;
-    return {
-      success: true,
-      mpesaReceipt,
-    };
+
+    const initiated = await initiateStkPush({
+      shopId: currentShopId,
+      phone,
+      amount,
+      accountReference: (profile.name || 'Sellora POS').slice(0, 12),
+      description,
+    });
+
+    if (!initiated.success || !initiated.checkoutRequestId) {
+      const errorMsg = initiated.error || 'Could not initiate M-Pesa payment.';
+      logAudit('STK_PUSH_FAILED', errorMsg);
+      return { success: false, error: errorMsg };
+    }
+
+    const result = await pollStkStatus(initiated.checkoutRequestId, { timeoutMs: 90000 });
+
+    if (result.status === 'success') {
+      logAudit('STK_PUSH_SUCCESS', `M-Pesa payment confirmed. Receipt: ${result.mpesaReceipt}`);
+      return { success: true, mpesaReceipt: result.mpesaReceipt };
+    }
+
+    const errorMsg =
+      result.status === 'timeout'
+        ? "Customer did not respond in time. Ask them to check their phone, or try again."
+        : result.status === 'cancelled'
+        ? 'Customer cancelled the payment request.'
+        : result.resultDesc || 'Payment failed.';
+    logAudit('STK_PUSH_FAILED', errorMsg);
+    return { success: false, error: errorMsg };
   };
 
   // Backup & Restore
@@ -2760,7 +2777,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteFamilyIncomeManual,
         mpesaConfig,
         updateMpesaConfig,
-        simulateStkPush,
+        triggerMpesaStkPush,
         auditLog,
         logAudit,
         exportBackupJSON,
