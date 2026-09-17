@@ -135,24 +135,46 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [session, setSession] = useState(() => getSuperAdminSession());
   const [accessCheck, setAccessCheck] = useState<{ isAdmin: boolean; hasPinSet: boolean } | null>(null);
   const [checkingAccess, setCheckingAccess] = useState(true);
+  const [accessCheckError, setAccessCheckError] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [pinConfirmInput, setPinConfirmInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
 
-  useEffect(() => {
-    if (session) return;
-    let cancelled = false;
+  const runAccessCheck = () => {
     setCheckingAccess(true);
-    checkSuperAdminAccess().then((result) => {
-      if (!cancelled) {
-        setAccessCheck(result);
-        setCheckingAccess(false);
-      }
-    });
+    setAccessCheckError('');
+    let cancelled = false;
+    checkSuperAdminAccess()
+      .then((result) => {
+        if (!cancelled) {
+          setAccessCheck(result);
+          setCheckingAccess(false);
+        }
+      })
+      .catch((err) => {
+        // Previously there was no .catch() here at all, so any thrown
+        // error (a network hiccup, an expired/invalid session, a
+        // transient Supabase error) left checkingAccess stuck at `true`
+        // forever with no feedback - an infinite spinner with no way
+        // out except reloading the page. Now it surfaces a real error
+        // and a retry button instead.
+        if (!cancelled) {
+          console.warn('Super admin access check failed:', err);
+          setAccessCheckError(
+            err instanceof Error ? err.message : 'Could not verify admin access. Check your connection and try again.'
+          );
+          setCheckingAccess(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
+  };
+
+  useEffect(() => {
+    if (session) return;
+    return runAccessCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
@@ -359,6 +381,21 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
           {checkingAccess ? (
             <div className="py-8 text-center text-sm text-slate-400">Checking your access…</div>
+          ) : accessCheckError ? (
+            <div className="p-4 rounded-xl bg-rose-950/50 border border-rose-800/50 text-rose-300 text-sm space-y-3">
+              <p className="font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                Couldn't verify access
+              </p>
+              <p className="text-rose-300/80 text-xs leading-relaxed">{accessCheckError}</p>
+              <button
+                type="button"
+                onClick={runAccessCheck}
+                className="w-full py-2 rounded-lg bg-rose-800/60 hover:bg-rose-800 text-white text-xs font-semibold transition-colors"
+              >
+                Try again
+              </button>
+            </div>
           ) : !accessCheck?.isAdmin ? (
             <div className="p-4 rounded-xl bg-rose-950/50 border border-rose-800/50 text-rose-300 text-sm space-y-2">
               <p className="font-semibold flex items-center gap-2">
