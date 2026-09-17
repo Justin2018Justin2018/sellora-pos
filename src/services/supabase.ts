@@ -512,20 +512,32 @@ export const syncDebtToSupabase = async (
 };
 
 /**
- * Pull transactions from Supabase
+ * Pull transactions from Supabase, scoped to one shop.
+ *
+ * shopId is REQUIRED (not optional) on purpose: this must always be the
+ * authoritative tenant id (AuthContext's shopId / shop_members.shop_id),
+ * never omitted and never a local UI concept like a till/branch selector.
+ * A signed-in user can be a member of more than one shop, so an unscoped
+ * query here would silently merge every accessible business's
+ * transactions into whichever screen called this - see the
+ * business-isolation audit for why this used to be an optional param.
  */
 export const fetchTransactionsFromSupabase = async (
-  shopId?: string
+  shopId: string
 ): Promise<Transaction[] | null> => {
   const client = getSupabase();
   if (!client) return null;
+  if (!shopId) {
+    console.warn('fetchTransactionsFromSupabase called without a shopId - refusing to run an unscoped query.');
+    return null;
+  }
 
   try {
-    let query = client.from('pos_transactions').select('*').order('id', { ascending: false });
-    if (shopId) {
-      query = query.eq('shop_id', shopId);
-    }
-    const { data, error } = await query;
+    const { data, error } = await client
+      .from('pos_transactions')
+      .select('*')
+      .eq('shop_id', shopId)
+      .order('id', { ascending: false });
     if (error || !data) {
       return null;
     }
@@ -558,14 +570,27 @@ export const fetchTransactionsFromSupabase = async (
 };
 
 /**
- * Deletes a transaction from Supabase cloud database
+ * Deletes a transaction from Supabase cloud database.
+ *
+ * shopId is REQUIRED and included in the query itself
+ * (`.eq('shop_id', shopId)`) as defense-in-depth on top of RLS: RLS alone
+ * already restricts this to shops the caller is a member of, but scoping
+ * the query too means a stale/wrong id from a client-side bug can never
+ * delete a row belonging to a DIFFERENT business this same user also has
+ * access to - it can only ever affect the currently active one. See the
+ * business-isolation audit (#109: verify business id at record
+ * modification).
  */
-export const deleteTransactionFromSupabase = async (id: number): Promise<boolean> => {
+export const deleteTransactionFromSupabase = async (id: number, shopId: string): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
+  if (!shopId) {
+    console.warn('deleteTransactionFromSupabase called without a shopId - refusing to run an unscoped delete.');
+    return false;
+  }
 
   try {
-    const { error } = await client.from('pos_transactions').delete().eq('id', id);
+    const { error } = await client.from('pos_transactions').delete().eq('id', id).eq('shop_id', shopId);
     if (error) {
       console.warn('Failed to delete transaction from Supabase:', error.message);
       return false;

@@ -18,6 +18,7 @@ import {
 import baseSchemaSql from '@/supabase-schema.sql?raw';
 import securityFixSql from '@/supabase-schema-v2-security-fix.sql?raw';
 import { usePOS } from '../../context/POSContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   Database,
   CheckCircle2,
@@ -38,8 +39,29 @@ interface SupabaseModalProps {
   onClose: () => void;
 }
 
+// Matches AuthGate's slugify exactly - a shop_id claimed here must land in
+// the same id space as one claimed through the main sign-up screen. Never
+// derive this id from a local UI concept like the till/branch selector
+// (see the business-isolation audit for what that bug looked like).
+const slugifyShopName = (value: string): string => {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-+|-+$)/g, '');
+  return slug || `shop-${Date.now()}`;
+};
+
 export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose }) => {
-  const { transactions, stock, currentShop, addToast } = usePOS();
+  const { transactions, stock, profile, addToast } = usePOS();
+  // The REAL tenant id (shop_members.shop_id, checked by every RLS policy).
+  // Deliberately NOT `currentShop` from usePOS() - that's a local
+  // branch/till selector (defaults to the literal string "shop_main" for
+  // every install) and is a completely different concept that happens to
+  // share the word "shop". Using it here used to mean every Supabase call
+  // in this modal ran against the wrong id and was silently rejected by
+  // RLS for any real tenant. See the business-isolation audit.
+  const { shopId: authShopId } = useAuth();
 
   const [isTesting, setIsTesting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -96,9 +118,16 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose })
     setAuthBusy(true);
     setAuthError(null);
     try {
+      // This modal should normally be unreachable while signed out - the
+      // app-level AuthGate already requires sign-in (and a claimed shop)
+      // before POSProvider/this modal ever mount. If it's somehow reached
+      // anyway (e.g. a session expiring mid-session), signing up here MUST
+      // still claim a real, unique tenant id - never the till/branch
+      // selector, which is the same literal default for every install and
+      // is a completely different concept from a shop_id.
       const result =
         authMode === 'signup'
-          ? await signUpShopAccount(authEmail, authPassword, currentShop.id)
+          ? await signUpShopAccount(authEmail, authPassword, slugifyShopName(profile.name))
           : await signInShopAccount(authEmail, authPassword);
 
       if (!result.success) {
@@ -160,7 +189,7 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose })
       });
       return;
     }
-    if (!isSignedIn) {
+    if (!isSignedIn || !authShopId) {
       addToast({
         type: 'error',
         title: 'Sign In Required',
@@ -172,11 +201,11 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose })
     setIsSyncing(true);
     try {
       // Sync stock
-      await syncStockToSupabase(stock, currentShop.id);
+      await syncStockToSupabase(stock, authShopId);
       // Sync last 50 transactions
       let syncedCount = 0;
       for (const tx of transactions.slice(0, 50)) {
-        const ok = await syncTransactionToSupabase(tx, currentShop.id);
+        const ok = await syncTransactionToSupabase(tx, authShopId);
         if (ok) syncedCount++;
       }
 
