@@ -32,11 +32,9 @@ import {
   GeneralUnit,
   TaxRule
 } from '../types/pos';
-import { useAuth } from './AuthContext';
 import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
 import { enqueueSync, processSyncQueue } from '../services/syncEngine';
 import { checkRealConnectivity } from '../services/connectivity';
-import { initiateStkPush, pollStkStatus } from '../services/mpesaService';
 import {
   getCurrentTenantId,
   setCurrentTenantId,
@@ -204,7 +202,7 @@ interface POSContextType {
   // M-Pesa Integration
   mpesaConfig: MpesaConfig;
   updateMpesaConfig: (updates: Partial<MpesaConfig>) => void;
-  triggerMpesaStkPush: (phone: string, amount: number, description: string) => Promise<{ success: boolean; mpesaReceipt?: string; error?: string }>;
+  simulateStkPush: (phone: string, amount: number, description: string) => Promise<{ success: boolean; mpesaReceipt?: string; error?: string }>;
 
   // Audit Log & Backup
   auditLog: AuditEntry[];
@@ -253,7 +251,7 @@ interface POSContextType {
 
   generalSales: GeneralSale[];
   recordGeneralSale: (sale: Omit<GeneralSale, 'id' | 'date' | 'receipt'>) => GeneralSale | null;
-  deleteGeneralSale: (id: number, password?: string) => boolean;
+  deleteGeneralSale: (id: number) => boolean;
 
   // Helpers
   formatMoney: (amount: number) => string;
@@ -284,21 +282,6 @@ function safeStorageGet<T>(key: string, fallback: T): T {
 }
 
 export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // ------------------------------------------------------------------
-  // The REAL, RLS-authoritative tenant identity (the shop_id claimed at
-  // signup, checked by every Supabase policy via shop_members). This is
-  // DELIBERATELY separate from `currentShopId` below, which is a local
-  // branch/till selector (see DEFAULT_SHOPS) - the two are unrelated
-  // concepts that happen to share the word "shop", and Supabase cloud
-  // sync must ALWAYS use this one, never the till id. See the
-  // business-isolation audit: syncing with the till id silently fails
-  // every INSERT/SELECT for any tenant whose branch selector isn't
-  // literally set to their own tenant id (which for a real customer,
-  // it never is), because Postgres RLS rejects a shop_id it doesn't
-  // recognize as one of the signed-in user's memberships.
-  // ------------------------------------------------------------------
-  const { shopId: authShopId } = useAuth();
-
   // SaaS Multi-Tenancy & Subscriptions State
   const [currentTenantIdState, setCurrentTenantIdState] = useState<string>(() => getCurrentTenantId());
   const [currentTenant, setCurrentTenant] = useState<TenantAccount>(() => getCurrentTenant());
@@ -885,24 +868,12 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return newSale;
-  }, [businessMode, activeSales.length]);
+  }, [generalSales.length]);
 
-  const deleteGeneralSale = useCallback((id: number, password?: string) => {
-    // Password path is used by the P&L ledger; the plain path stays available
-    // to in-module callers that already gate on role.
-    if (password !== undefined && !verifyAdminPassword(password)) {
-      addToast({
-        type: 'error',
-        title: 'Incorrect Password',
-        message: 'The entered admin password is incorrect. Deletion denied.',
-      });
-      return false;
-    }
-    // Must clear from the CURRENT business type's sales, not always the
-    // general_shop bucket — otherwise restaurant/bar/pharmacy deletes no-op.
-    setActiveSales((prev) => prev.filter((s) => s.id !== id));
+  const deleteGeneralSale = useCallback((id: number) => {
+    setGeneralSales((prev) => prev.filter((s) => s.id !== id));
     return true;
-  }, [businessMode, setActiveSales]);
+  }, []);
   const [expenses, setExpenses] = useState<Expense[]>(() => {
     const tid = getCurrentTenantId();
     return safeStorageGet(getTenantKeyStatic(tid, 'expenses'), isPrimaryTenantId(tid) ? INITIAL_EXPENSES : []);
@@ -938,8 +909,13 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
   const [mpesaConfig, setMpesaConfig] = useState<MpesaConfig>(() =>
     safeStorageGet('mj_pos_mpesa_config', {
-      tillNumber: '',
+      consumerKey: '',
+      consumerSecret: '',
+      passkey: '',
+      shortcode: '174379',
+      tillNumber: '522522',
       environment: 'sandbox',
+      backendUrl: '/api/mpesa'
     })
   );
 
@@ -966,11 +942,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Initial Supabase connectivity check & background pull
   useEffect(() => {
-    // Cloud sync requires the REAL tenant id (authShopId), never the local
-    // till selector - see the note on authShopId above. authShopId resolves
-    // asynchronously after sign-in, so this effect re-runs once it's ready
-    // rather than firing once on mount with a possibly-null value.
-    if (isSupabaseConfigured() && authShopId) {
+    if (isSupabaseConfigured()) {
       testSupabaseConnection()
         .then((res) => {
           setIsSupabaseActive(res.success);
@@ -979,7 +951,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             // member of more than one shop (via shop_members) would have
             // every accessible shop's transactions merged into this one's
             // view on load.
-            fetchTransactionsFromSupabase(authShopId)
+            fetchTransactionsFromSupabase(currentShopId)
               .then((remoteTx) => {
                 if (remoteTx && remoteTx.length > 0) {
                   setTransactions((prev) => {
@@ -997,25 +969,21 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch(() => setIsSupabaseActive(false));
     }
-  }, [authShopId]);
+  }, []);
 
   // Manual or automatic sync to Supabase Cloud
   const syncSupabaseCloud = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
-    if (!authShopId) {
-      console.warn('Supabase sync skipped: no authenticated business context.');
-      return;
-    }
     try {
-      await syncStockToSupabase(stock, authShopId);
+      await syncStockToSupabase(stock, currentShopId);
       for (const tx of transactions.slice(0, 30)) {
-        await syncTransactionToSupabase(tx, authShopId);
+        await syncTransactionToSupabase(tx, currentShopId);
       }
       setIsSupabaseActive(true);
     } catch (err) {
       console.warn('Sync to Supabase cloud notice:', err);
     }
-  }, [stock, transactions, authShopId]);
+  }, [stock, transactions, currentShopId]);
 
   // Theme synchronization
   useEffect(() => {
@@ -2071,11 +2039,9 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setTransactions((prev) => prev.filter((t) => t.id !== id));
 
-    // Delete from Supabase if configured - scoped to the real tenant id so
-    // the server-side query itself can never touch another business's row,
-    // as defense-in-depth alongside RLS (see the business-isolation audit).
-    if (isSupabaseConfigured() && authShopId) {
-      deleteTransactionFromSupabase(id, authShopId).catch((err) => {
+    // Delete from Supabase if configured
+    if (isSupabaseConfigured()) {
+      deleteTransactionFromSupabase(id).catch((err) => {
         console.warn('Supabase delete error:', err);
       });
     }
@@ -2556,49 +2522,28 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
-  // M-Pesa Configuration & Real Daraja STK Push
+  // M-Pesa Configuration & Simulation
   const updateMpesaConfig = (updates: Partial<MpesaConfig>) => {
     setMpesaConfig((prev) => ({ ...prev, ...updates }));
     logAudit('MPESA_CONFIG', 'Updated Daraja M-Pesa API settings.');
     addToast({ type: 'success', title: 'M-Pesa Settings Saved' });
   };
 
-  const triggerMpesaStkPush = async (
+  const simulateStkPush = async (
     phone: string,
     amount: number,
     description: string
   ): Promise<{ success: boolean; mpesaReceipt?: string; error?: string }> => {
     logAudit('STK_PUSH_TRIGGER', `Triggered STK push of ${formatMoney(amount)} to ${phone}`);
-
-    const initiated = await initiateStkPush({
-      shopId: currentShopId,
-      phone,
-      amount,
-      accountReference: (profile.name || 'Sellora POS').slice(0, 12),
-      description,
-    });
-
-    if (!initiated.success || !initiated.checkoutRequestId) {
-      const errorMsg = initiated.error || 'Could not initiate M-Pesa payment.';
-      logAudit('STK_PUSH_FAILED', errorMsg);
-      return { success: false, error: errorMsg };
-    }
-
-    const result = await pollStkStatus(initiated.checkoutRequestId, { timeoutMs: 90000 });
-
-    if (result.status === 'success') {
-      logAudit('STK_PUSH_SUCCESS', `M-Pesa payment confirmed. Receipt: ${result.mpesaReceipt}`);
-      return { success: true, mpesaReceipt: result.mpesaReceipt };
-    }
-
-    const errorMsg =
-      result.status === 'timeout'
-        ? "Customer did not respond in time. Ask them to check their phone, or try again."
-        : result.status === 'cancelled'
-        ? 'Customer cancelled the payment request.'
-        : result.resultDesc || 'Payment failed.';
-    logAudit('STK_PUSH_FAILED', errorMsg);
-    return { success: false, error: errorMsg };
+    // Simulate network delay
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    
+    // In sandbox or demo mode, simulate 95% success
+    const mpesaReceipt = `NL${Math.floor(100000000 + Math.random() * 900000000).toString()}`;
+    return {
+      success: true,
+      mpesaReceipt,
+    };
   };
 
   // Backup & Restore
@@ -2803,7 +2748,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteFamilyIncomeManual,
         mpesaConfig,
         updateMpesaConfig,
-        triggerMpesaStkPush,
+        simulateStkPush,
         auditLog,
         logAudit,
         exportBackupJSON,

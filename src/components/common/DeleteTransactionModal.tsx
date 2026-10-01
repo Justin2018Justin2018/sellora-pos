@@ -15,7 +15,7 @@ import {
   CreditCard
 } from 'lucide-react';
 
-export type DeletableRecordKind = 'cyber' | 'gas' | 'electronics' | 'general' | 'expense' | 'family';
+export type DeletableRecordKind = 'cyber' | 'gas' | 'electronics' | 'expense' | 'family';
 
 export interface DeletableItemDetails {
   id: string | number;
@@ -56,7 +56,6 @@ export const DeleteTransactionModal: React.FC<DeleteTransactionModalProps> = ({
     deleteTransaction,
     deleteGasRefill,
     deleteElectronicsSale,
-    deleteGeneralSale,
     deleteExpense,
     deleteFamilyExpense,
     formatMoney,
@@ -144,7 +143,6 @@ export const DeleteTransactionModal: React.FC<DeleteTransactionModalProps> = ({
     cyber: 'Cyber & POS Sale',
     gas: 'Gas Refill Record',
     electronics: 'Electronics Sale',
-    general: 'Product Sale',
     expense: 'Shop Expense',
     family: 'Family Drawing',
   };
@@ -167,8 +165,6 @@ export const DeleteTransactionModal: React.FC<DeleteTransactionModalProps> = ({
         success = deleteGasRefill(Number(activeTarget.id), password);
       } else if (resolvedType === 'electronics') {
         success = deleteElectronicsSale(Number(activeTarget.id), password);
-      } else if (resolvedType === 'general') {
-        success = deleteGeneralSale(Number(activeTarget.id), password);
       } else if (resolvedType === 'expense') {
         success = deleteExpense(Number(activeTarget.id), password);
       } else if (resolvedType === 'family') {

@@ -16,8 +16,6 @@ import {
 } from 'lucide-react';
 import { Transaction } from '../../types/pos';
 import { DeleteTransactionModal } from '../common/DeleteTransactionModal';
-import { generalSaleToTransaction } from '../../utils/generalSaleAdapter';
-import { getRevenueStreams } from '../../data/reportStreams';
 
 interface TransactionsViewProps {
   onOpenReceipt: (tx: Transaction) => void;
@@ -25,33 +23,13 @@ interface TransactionsViewProps {
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceipt }) => {
   const {
-    businessMode,
     transactions,
-    generalSales,
     deleteTransaction,
     cancelTransaction,
     formatMoney,
     hasRole,
     profile,
   } = usePOS();
-
-  // Cyber is the only mode that sells through the service ledger. Every other
-  // business type sells through the product POS, so read its sales instead of
-  // showing an empty cyber ledger.
-  const isServiceMode = businessMode === 'cyber';
-  const wording = useMemo(() => {
-    const general = getRevenueStreams(businessMode).find((st) => st.key === 'general');
-    return {
-      title: isServiceMode ? 'Sales & Transaction History' : `${general?.tabLabel || 'Sales'} History`,
-      unit: isServiceMode ? 'sales' : general?.unitLabel || 'sales',
-      costLabel: isServiceMode ? 'Material Cost Deducted' : 'Cost of Goods Sold',
-    };
-  }, [businessMode, isServiceMode]);
-
-  const sourceTransactions = useMemo(
-    () => (isServiceMode ? transactions : generalSales.map(generalSaleToTransaction)),
-    [isServiceMode, transactions, generalSales]
-  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
@@ -63,7 +41,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
     const now = new Date();
     const todayKey = now.toISOString().slice(0, 10);
 
-    return sourceTransactions.filter((t) => {
+    return transactions.filter((t) => {
       // Search
       const q = searchQuery.toLowerCase().trim();
       if (
@@ -91,7 +69,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
 
       return true;
     });
-  }, [sourceTransactions, searchQuery, paymentFilter, periodFilter]);
+  }, [transactions, searchQuery, paymentFilter, periodFilter]);
 
   // Aggregate stats
   const totals = useMemo(() => {
@@ -116,9 +94,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
       'Date',
       'Customer',
       'Phone',
-      isServiceMode ? 'Services' : 'Items',
+      'Services',
       'Total (KES)',
-      isServiceMode ? 'Material Cost (KES)' : 'Cost of Goods (KES)',
+      'Material Cost (KES)',
       'Profit (KES)',
       'Payment Method',
       'Status',
@@ -160,7 +138,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
               <span>Audit Trail & Sales Ledger</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-              📋 {wording.title}
+              📋 Sales & Transaction History
             </h2>
             <p className="mt-1 text-xs sm:text-sm text-blue-100 max-w-xl">
               Inspect past orders, reprint customer invoices, resend WhatsApp receipts, and verify cashier audit logs.
@@ -186,11 +164,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
           <h4 className="text-2xl font-black text-slate-900 dark:text-white mt-1">
             {formatMoney(totals.sales)}
           </h4>
-          <span className="text-xs text-slate-500">{filtered.length} matched {wording.unit}</span>
+          <span className="text-xs text-slate-500">{filtered.length} matched sales</span>
         </div>
 
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-bold text-slate-400 uppercase">{wording.costLabel}</span>
+          <span className="text-xs font-bold text-slate-400 uppercase">Material Cost Deducted</span>
           <h4 className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
             {formatMoney(totals.material)}
           </h4>
@@ -362,7 +340,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
                         >
                           Receipt
                         </button>
-                        {isServiceMode && hasRole('admin') && !isCancelled && (
+                        {hasRole('admin') && !isCancelled && (
                           <button
                             onClick={() => {
                               const reason = prompt('Reason for voiding/cancelling transaction?');
@@ -403,7 +381,6 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ onOpenReceip
       <DeleteTransactionModal
         isOpen={!!transactionToDelete}
         transaction={transactionToDelete}
-        transactionType={isServiceMode ? 'cyber' : 'general'}
         onClose={() => setTransactionToDelete(null)}
       />
     </div>

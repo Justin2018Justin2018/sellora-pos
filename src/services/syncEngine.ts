@@ -68,20 +68,12 @@ async function pushSale(localId: string): Promise<void> {
   if (error) throw error;
 }
 
-// Every push below sets shop_id explicitly from the offline record's own
-// SyncMeta.shopId, exactly like pushSale does - never from ...payload. A
-// spread payload might be missing shop_id, might carry a stale one from
-// before a business switch, or (once this layer is wired into the live
-// create flows) might simply not be trusted to self-report which business
-// it belongs to. shopId on the offline record is set once, at creation
-// time, from the actual signed-in tenant - see offlineDb.ts.
-
 async function pushDebt(localId: string): Promise<void> {
   const client = getSupabase();
   if (!client) throw new Error('Supabase not configured');
   const record = await offlineDb.debts.get(localId);
   if (!record) return;
-  const { error } = await client.from('pos_debts').upsert({ ...record.payload, id: localId, shop_id: record.shopId });
+  const { error } = await client.from('pos_debts').upsert({ id: localId, ...record.payload });
   if (error) throw error;
 }
 
@@ -90,7 +82,7 @@ async function pushExpense(localId: string): Promise<void> {
   if (!client) throw new Error('Supabase not configured');
   const record = await offlineDb.expenses.get(localId);
   if (!record) return;
-  const { error } = await client.from('pos_expenses').upsert({ ...record.payload, id: localId, shop_id: record.shopId });
+  const { error } = await client.from('pos_expenses').upsert({ id: localId, ...record.payload });
   if (error) throw error;
 }
 
@@ -99,7 +91,7 @@ async function pushCustomer(localId: string): Promise<void> {
   if (!client) throw new Error('Supabase not configured');
   const record = await offlineDb.customers.get(localId);
   if (!record) return;
-  const { error } = await client.from('pos_customers').upsert({ ...record.payload, id: localId, shop_id: record.shopId });
+  const { error } = await client.from('pos_customers').upsert({ id: localId, ...record.payload });
   if (error) throw error;
 }
 
