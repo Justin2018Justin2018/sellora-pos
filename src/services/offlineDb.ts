@@ -78,9 +78,14 @@ export interface OfflineCustomer extends SyncMeta {
  * describing the work still to do. Processed with exponential backoff
  * (see syncEngine.ts) so a flaky connection doesn't hammer Supabase.
  */
+/** A Cyber print job created on this device (manual log / offline). Pushed to print_jobs, idempotent by id. */
+export interface OfflinePrintJob extends SyncMeta {
+  payload: Record<string, unknown>;
+}
+
 export interface SyncQueueEntry {
   id?: number;
-  entityType: 'sale' | 'stockMovement' | 'debt' | 'debtPayment' | 'expense' | 'customer';
+  entityType: 'sale' | 'stockMovement' | 'debt' | 'debtPayment' | 'expense' | 'customer' | 'printJob';
   entityLocalId: string;
   operation: SyncOperation;
   createdAt: string;
@@ -104,6 +109,7 @@ class SelloraOfflineDb extends Dexie {
   debtPayments!: Table<OfflineDebtPayment, string>;
   expenses!: Table<OfflineExpense, string>;
   customers!: Table<OfflineCustomer, string>;
+  printJobs!: Table<OfflinePrintJob, string>;
   syncQueue!: Table<SyncQueueEntry, number>;
   meta!: Table<MetaEntry, string>;
 
@@ -118,6 +124,10 @@ class SelloraOfflineDb extends Dexie {
       customers: 'localId, shopId, syncStatus, createdAt',
       syncQueue: '++id, entityType, entityLocalId, status, createdAt, nextAttemptAt',
       meta: 'key',
+    });
+    // v2: Cyber Print Monitor jobs created on this device (additive - no existing store changed).
+    this.version(2).stores({
+      printJobs: 'localId, shopId, syncStatus, createdAt',
     });
   }
 }
@@ -151,7 +161,7 @@ export const getSyncCounts = async (): Promise<{
   failed: number;
   synced: number;
 }> => {
-  const tables = [offlineDb.sales, offlineDb.stockMovements, offlineDb.debts, offlineDb.debtPayments, offlineDb.expenses, offlineDb.customers];
+  const tables = [offlineDb.sales, offlineDb.stockMovements, offlineDb.debts, offlineDb.debtPayments, offlineDb.expenses, offlineDb.customers, offlineDb.printJobs];
   const counts = { pending: 0, syncing: 0, failed: 0, synced: 0 };
   for (const table of tables) {
     const [pending, syncing, failed, synced] = await Promise.all([

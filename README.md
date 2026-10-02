@@ -23,3 +23,9 @@ Run, in order, in the Supabase SQL Editor:
 2. `supabase-schema-v2-security-fix.sql`
 3. `supabase-schema-v3-claim-shop-fix.sql`
 
+
+
+## Cyber Print Monitor (added)
+* Run `supabase-schema-v4-cyber-print-monitor.sql` once (after v1–v3). Cyber-only, enforced by RLS (`is_cyber_member`).
+* Sidebar (Cyber business only): Print Monitor, Print History, Print Report.
+* Windows agent: see `print-agent/README.md`.

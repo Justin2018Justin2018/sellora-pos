@@ -40,7 +40,10 @@ export type TabKey =
   | 'reports'
   | 'staff'
   | 'settings'
-  | 'ai';
+  | 'ai'
+  | 'print_monitor'
+  | 'print_history'
+  | 'print_report';
 
 interface NavigationProps {
   activeTab: TabKey;

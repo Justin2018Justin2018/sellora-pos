@@ -47,6 +47,9 @@ import { GeneralSuppliersView } from './components/general/GeneralSuppliersView'
 import { GeneralProfitView } from './components/general/GeneralProfitView';
 
 import { Transaction } from './types/pos';
+import { PrintMonitorView } from './components/print/PrintMonitorView';
+import { PrintHistoryView } from './components/print/PrintHistoryView';
+import { PrintReportView } from './components/print/PrintReportView';
 import { Sparkles, ShieldCheck, Database, LogOut } from 'lucide-react';
 
 const TAB_TITLES: Record<TabKey, string> = {
@@ -71,6 +74,9 @@ const TAB_TITLES: Record<TabKey, string> = {
   general_categories: 'Product Categories',
   general_suppliers: 'Supplier Directory',
   general_profit: 'Profit & Financial Analysis',
+  print_monitor: 'Cyber Print Monitor',
+  print_history: 'Cyber Print History',
+  print_report: 'Cyber Print Report',
 };
 
 const MainApp: React.FC = () => {
@@ -97,6 +103,11 @@ const MainApp: React.FC = () => {
   const [isBusinessTypeModalOpen, setIsBusinessTypeModalOpen] = useState(false);
   const [initialSaleService, setInitialSaleService] = useState<string | undefined>(undefined);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Print tabs exist only in Cyber. Leaving Cyber while on one bounces back to the dashboard.
+  useEffect(() => {
+    if (businessMode !== 'cyber' && activeTab.startsWith('print_')) setActiveTab('dashboard');
+  }, [businessMode, activeTab]);
 
   // Check if first time setup is needed
   useEffect(() => {
@@ -285,6 +296,10 @@ const MainApp: React.FC = () => {
           {activeTab === 'settings' && <SettingsView />}
 
           {activeTab === 'ai' && <AIAssistantView />}
+
+          {businessMode === 'cyber' && activeTab === 'print_monitor' && <PrintMonitorView />}
+          {businessMode === 'cyber' && activeTab === 'print_history' && <PrintHistoryView />}
+          {businessMode === 'cyber' && activeTab === 'print_report' && <PrintReportView />}
         </main>
 
         {/* Signature Professional Polish Footer */}

@@ -32,7 +32,7 @@ const BACKOFF_SCHEDULE_MS = [30_000, 120_000, 300_000, 900_000, 1_800_000]; // 3
 const nextBackoffDelay = (attempts: number): number =>
   BACKOFF_SCHEDULE_MS[Math.min(attempts, BACKOFF_SCHEDULE_MS.length - 1)];
 
-const ENTITIES_READY_TO_SYNC: SyncQueueEntry['entityType'][] = ['sale', 'debt', 'debtPayment', 'expense', 'customer'];
+const ENTITIES_READY_TO_SYNC: SyncQueueEntry['entityType'][] = ['sale', 'debt', 'debtPayment', 'expense', 'customer', 'printJob'];
 
 async function pushSale(localId: string): Promise<void> {
   const client = getSupabase();
@@ -95,6 +95,16 @@ async function pushCustomer(localId: string): Promise<void> {
   if (error) throw error;
 }
 
+async function pushPrintJob(localId: string): Promise<void> {
+  const client = getSupabase();
+  if (!client) throw new Error('Supabase not configured');
+  const record = await offlineDb.printJobs.get(localId);
+  if (!record) return;
+  // Upsert by the device-generated id: re-sending can never create a second job row.
+  const { error } = await client.from('print_jobs').upsert({ ...record.payload, id: localId }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
 /**
  * Processes every due queue entry once. Safe to call repeatedly (e.g. on
  * an interval, on reconnect, or via the manual Sync Now button) - each
@@ -141,6 +151,10 @@ export async function processSyncQueue(): Promise<{ succeeded: number; failed: n
         case 'customer':
           await pushCustomer(entry.entityLocalId);
           await offlineDb.customers.update(entry.entityLocalId, { syncStatus: 'synced' });
+          break;
+        case 'printJob':
+          await pushPrintJob(entry.entityLocalId);
+          await offlineDb.printJobs.update(entry.entityLocalId, { syncStatus: 'synced' });
           break;
         default:
           break;
