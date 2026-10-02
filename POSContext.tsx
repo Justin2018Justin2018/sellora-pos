@@ -599,6 +599,50 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return safeStorageGet(getTenantKeyStatic(tid, 'other_sales'), []);
   });
 
+  // 9. Bar & Pub State
+  const [barProducts, setBarProducts] = useState<GeneralProduct[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_products'), getBusinessTypeConfig('bar').defaultProducts as GeneralProduct[]);
+  });
+  const [barCategories, setBarCategories] = useState<GeneralCategory[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_categories'), getBusinessTypeConfig('bar').defaultCategories);
+  });
+  const [barSuppliers, setBarSuppliers] = useState<GeneralSupplier[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_suppliers'), getBusinessTypeConfig('bar').defaultSuppliers);
+  });
+  const [barPurchases, setBarPurchases] = useState<GeneralPurchase[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_purchases'), []);
+  });
+  const [barSales, setBarSales] = useState<GeneralSale[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'bar_sales'), []);
+  });
+
+  // 10. Guest House & Lodging State
+  const [guestHouseProducts, setGuestHouseProducts] = useState<GeneralProduct[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_products'), getBusinessTypeConfig('guest_house').defaultProducts as GeneralProduct[]);
+  });
+  const [guestHouseCategories, setGuestHouseCategories] = useState<GeneralCategory[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_categories'), getBusinessTypeConfig('guest_house').defaultCategories);
+  });
+  const [guestHouseSuppliers, setGuestHouseSuppliers] = useState<GeneralSupplier[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_suppliers'), getBusinessTypeConfig('guest_house').defaultSuppliers);
+  });
+  const [guestHousePurchases, setGuestHousePurchases] = useState<GeneralPurchase[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_purchases'), []);
+  });
+  const [guestHouseSales, setGuestHouseSales] = useState<GeneralSale[]>(() => {
+    const tid = getCurrentTenantId();
+    return safeStorageGet(getTenantKeyStatic(tid, 'guest_house_sales'), []);
+  });
+
   // Dynamic active mappings based on businessMode
   const activeProducts =
     businessMode === 'cyber' ? cyberProducts :
@@ -608,6 +652,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantProducts :
     businessMode === 'pharmacy' ? pharmacyProducts :
     businessMode === 'other' ? otherProducts :
+    businessMode === 'bar' ? barProducts :
+    businessMode === 'guest_house' ? guestHouseProducts :
     businessMode === 'all' ? [...cyberProducts, ...gasProducts, ...techProducts, ...generalProducts] :
     generalProducts;
 
@@ -619,6 +665,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantProducts :
     businessMode === 'pharmacy' ? setPharmacyProducts :
     businessMode === 'other' ? setOtherProducts :
+    businessMode === 'bar' ? setBarProducts :
+    businessMode === 'guest_house' ? setGuestHouseProducts :
     setGeneralProducts;
 
   const activeCategories =
@@ -629,6 +677,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantCategories :
     businessMode === 'pharmacy' ? pharmacyCategories :
     businessMode === 'other' ? otherCategories :
+    businessMode === 'bar' ? barCategories :
+    businessMode === 'guest_house' ? guestHouseCategories :
     generalCategories;
 
   const setActiveCategories =
@@ -639,6 +689,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantCategories :
     businessMode === 'pharmacy' ? setPharmacyCategories :
     businessMode === 'other' ? setOtherCategories :
+    businessMode === 'bar' ? setBarCategories :
+    businessMode === 'guest_house' ? setGuestHouseCategories :
     setGeneralCategories;
 
   const activeSuppliers =
@@ -649,6 +701,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantSuppliers :
     businessMode === 'pharmacy' ? pharmacySuppliers :
     businessMode === 'other' ? otherSuppliers :
+    businessMode === 'bar' ? barSuppliers :
+    businessMode === 'guest_house' ? guestHouseSuppliers :
     generalSuppliers;
 
   const setActiveSuppliers =
@@ -659,6 +713,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantSuppliers :
     businessMode === 'pharmacy' ? setPharmacySuppliers :
     businessMode === 'other' ? setOtherSuppliers :
+    businessMode === 'bar' ? setBarSuppliers :
+    businessMode === 'guest_house' ? setGuestHouseSuppliers :
     setGeneralSuppliers;
 
   const activePurchases =
@@ -669,6 +725,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantPurchases :
     businessMode === 'pharmacy' ? pharmacyPurchases :
     businessMode === 'other' ? otherPurchases :
+    businessMode === 'bar' ? barPurchases :
+    businessMode === 'guest_house' ? guestHousePurchases :
     generalPurchases;
 
   const setActivePurchases =
@@ -679,6 +737,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantPurchases :
     businessMode === 'pharmacy' ? setPharmacyPurchases :
     businessMode === 'other' ? setOtherPurchases :
+    businessMode === 'bar' ? setBarPurchases :
+    businessMode === 'guest_house' ? setGuestHousePurchases :
     setGeneralPurchases;
 
   const activeSales =
@@ -689,6 +749,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? restaurantSales :
     businessMode === 'pharmacy' ? pharmacySales :
     businessMode === 'other' ? otherSales :
+    businessMode === 'bar' ? barSales :
+    businessMode === 'guest_house' ? guestHouseSales :
     generalSales;
 
   const setActiveSales =
@@ -699,6 +761,8 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     businessMode === 'restaurant' ? setRestaurantSales :
     businessMode === 'pharmacy' ? setPharmacySales :
     businessMode === 'other' ? setOtherSales :
+    businessMode === 'bar' ? setBarSales :
+    businessMode === 'guest_house' ? setGuestHouseSales :
     setGeneralSales;
 
   const addGeneralProduct = useCallback((prod: Omit<GeneralProduct, 'id'>) => {
@@ -891,12 +955,25 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               .then((remoteTx) => {
                 if (remoteTx && remoteTx.length > 0) {
                   setTransactions((prev) => {
-                    const existingIds = new Set(prev.map((t) => t.id));
-                    const newItems = remoteTx.filter((t) => !existingIds.has(t.id));
-                    if (newItems.length > 0) {
-                      return [...newItems, ...prev];
+                    // De-duplicate by receipt (fall back to id). Self-heals browsers that
+                    // already accumulated duplicate copies from the old NaN-id bug.
+                    const keyOf = (t: Transaction) => (t.receipt ? `r:${t.receipt}` : `i:${String(t.id)}`);
+                    const byKey = new Map<string, Transaction>();
+                    for (const t of prev) {
+                      const k = keyOf(t);
+                      if (!byKey.has(k)) byKey.set(k, t);
                     }
-                    return prev;
+                    for (const t of remoteTx) {
+                      const k = keyOf(t);
+                      const existing = byKey.get(k);
+                      if (!existing) byKey.set(k, t);
+                      // Archived history: the cloud copy (with service lines + original profit) is authoritative.
+                      else if (t.historical) byKey.set(k, { ...existing, ...t });
+                    }
+                    const merged = Array.from(byKey.values()).sort(
+                      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+                    );
+                    return merged;
                   });
                 }
               })
@@ -1138,6 +1215,18 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setOtherPurchases(safeStorageGet(getTenantKeyStatic(newTenantId, 'other_purchases'), []));
     setOtherSales(safeStorageGet(getTenantKeyStatic(newTenantId, 'other_sales'), []));
 
+    setBarProducts(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_products'), getBusinessTypeConfig('bar').defaultProducts as GeneralProduct[]));
+    setBarCategories(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_categories'), getBusinessTypeConfig('bar').defaultCategories));
+    setBarSuppliers(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_suppliers'), getBusinessTypeConfig('bar').defaultSuppliers));
+    setBarPurchases(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_purchases'), []));
+    setBarSales(safeStorageGet(getTenantKeyStatic(newTenantId, 'bar_sales'), []));
+
+    setGuestHouseProducts(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_products'), getBusinessTypeConfig('guest_house').defaultProducts as GeneralProduct[]));
+    setGuestHouseCategories(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_categories'), getBusinessTypeConfig('guest_house').defaultCategories));
+    setGuestHouseSuppliers(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_suppliers'), getBusinessTypeConfig('guest_house').defaultSuppliers));
+    setGuestHousePurchases(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_purchases'), []));
+    setGuestHouseSales(safeStorageGet(getTenantKeyStatic(newTenantId, 'guest_house_sales'), []));
+
     const targetMode = (targetTenant.businessType as BusinessMode) || 'cyber';
     setBusinessModeState(targetMode);
     localStorage.setItem(getTenantKeyStatic(newTenantId, 'business_mode'), JSON.stringify(targetMode));
@@ -1205,6 +1294,18 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(getTenantKeyStatic(tid, 'other_suppliers'), JSON.stringify(otherSuppliers));
     localStorage.setItem(getTenantKeyStatic(tid, 'other_purchases'), JSON.stringify(otherPurchases));
     localStorage.setItem(getTenantKeyStatic(tid, 'other_sales'), JSON.stringify(otherSales));
+
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_products'), JSON.stringify(barProducts));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_categories'), JSON.stringify(barCategories));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_suppliers'), JSON.stringify(barSuppliers));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_purchases'), JSON.stringify(barPurchases));
+    localStorage.setItem(getTenantKeyStatic(tid, 'bar_sales'), JSON.stringify(barSales));
+
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_products'), JSON.stringify(guestHouseProducts));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_categories'), JSON.stringify(guestHouseCategories));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_suppliers'), JSON.stringify(guestHouseSuppliers));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_purchases'), JSON.stringify(guestHousePurchases));
+    localStorage.setItem(getTenantKeyStatic(tid, 'guest_house_sales'), JSON.stringify(guestHouseSales));
   }, [
     cyberProducts, cyberCategories, cyberSuppliers, cyberPurchases, cyberSales,
     gasProducts, gasCategories, gasSuppliers, gasPurchases, gasSales,
@@ -1213,7 +1314,9 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     clothingProducts, clothingCategories, clothingSuppliers, clothingPurchases, clothingSales,
     restaurantProducts, restaurantCategories, restaurantSuppliers, restaurantPurchases, restaurantSales,
     pharmacyProducts, pharmacyCategories, pharmacySuppliers, pharmacyPurchases, pharmacySales,
-    otherProducts, otherCategories, otherSuppliers, otherPurchases, otherSales
+    otherProducts, otherCategories, otherSuppliers, otherPurchases, otherSales,
+    barProducts, barCategories, barSuppliers, barPurchases, barSales,
+    guestHouseProducts, guestHouseCategories, guestHouseSuppliers, guestHousePurchases, guestHouseSales
   ]);
 
   // Current shop helper

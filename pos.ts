@@ -6,6 +6,8 @@ export type BusinessMode =
   | 'clothing'
   | 'restaurant'
   | 'pharmacy'
+  | 'bar'
+  | 'guest_house'
   | 'other'
   | 'all';
 
@@ -235,6 +237,9 @@ export interface Transaction {
   taxAmount?: number;
   taxMode?: 'inclusive' | 'exclusive';
   taxName?: string;
+  /** True for archived Mama Justo records (read-only). Absent/false for current Sellora sales. */
+  historical?: boolean;
+  sourceSystem?: 'sellora' | 'mama_justo';
 }
 
 export interface GasTransaction {

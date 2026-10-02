@@ -530,27 +530,51 @@ export const fetchTransactionsFromSupabase = async (
       return null;
     }
 
-    return data.map((row: any) => ({
-      id: Number(row.id),
-      receipt: row.receipt,
-      date: row.date,
-      customer: row.customer,
-      service: row.service,
-      services: [],
-      qty: Number(row.qty),
-      price: Number(row.unit_price),
-      subtotal: Number(row.total),
-      total: Number(row.total),
-      material: 0,
-      materialTotal: Number(row.material_cost || 0),
-      paid: Number(row.total),
-      change: 0,
-      profit: Number(row.total) - Number(row.material_cost || 0),
-      payment: row.payment,
-      staff: row.staff,
-      notes: row.notes || undefined,
-      status: row.status,
-    }));
+    // IMPORTANT: ids are UUID strings (offline-first + migrated history). Never coerce
+    // them with Number() - that produced NaN ids and made every reload re-add the same
+    // sales. Rich fields (service lines, original profit, paid/change) live in `payload`.
+    return data.map((row: any): Transaction => {
+      const p = (row.payload && typeof row.payload === 'object') ? row.payload : {};
+      const total = Number(row.total);
+      const materialTotal = Number(p.materialTotal ?? row.material_cost ?? 0);
+      const profit = p.profit !== undefined && p.profit !== null
+        ? Number(p.profit)
+        : row.original_profit !== null && row.original_profit !== undefined
+          ? Number(row.original_profit)
+          : total - materialTotal;
+      return {
+        id: String(row.id),
+        receipt: row.receipt,
+        date: row.date,
+        customer: row.customer,
+        idNumber: p.idNumber,
+        phone: p.phone,
+        address: p.address,
+        service: row.service,
+        services: Array.isArray(p.services) ? p.services : [],
+        qty: Number(p.qty ?? row.qty),
+        price: Number(p.price ?? row.unit_price),
+        subtotal: Number(p.subtotal ?? total),
+        total,
+        material: Number(p.material ?? 0),
+        materialTotal,
+        paid: Number(p.paid ?? total),
+        change: Number(p.change ?? 0),
+        profit,
+        payment: row.payment,
+        staff: row.staff,
+        shopId: row.shop_id,
+        stockUsed: p.stockUsed ?? null,
+        notes: row.notes || undefined,
+        status: row.status,
+        taxRate: p.taxRate,
+        taxAmount: p.taxAmount,
+        taxMode: p.taxMode,
+        taxName: p.taxName,
+        historical: row.historical === true,
+        sourceSystem: row.source_system === 'mama_justo' ? 'mama_justo' : 'sellora',
+      };
+    });
   } catch (err) {
     console.warn('Error fetching from Supabase:', err);
     return null;
