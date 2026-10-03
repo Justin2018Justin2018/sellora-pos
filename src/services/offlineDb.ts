@@ -94,6 +94,8 @@ export interface SyncQueueEntry {
   /** When this entry becomes eligible to retry again (exponential backoff). */
   nextAttemptAt: string;
   errorMessage?: string;
+  /** Set when the server will never accept this payload as sent; auto-retry stops, manual retry stays possible. */
+  errorKind?: 'transient' | 'permanent' | 'blocked';
   status: SyncStatus;
 }
 

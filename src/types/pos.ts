@@ -219,6 +219,8 @@ export interface Transaction {
   qty: number;
   price: number;
   subtotal: number;
+  /** Discount applied to this sale, in money units. Written by SaleView/GeneralSaleView and read by ReceiptModal. */
+  discount?: number;
   total: number;
   material: number;
   materialTotal: number;

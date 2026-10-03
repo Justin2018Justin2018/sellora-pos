@@ -4,6 +4,7 @@ import {
   SyncQueueEntry,
   setLastSuccessfulSync,
 } from './offlineDb';
+import { nextBackoffDelay, classifySyncError, isStaleSyncing } from './syncPolicy';
 
 /**
  * ------------------------------------------------------------------
@@ -26,11 +27,6 @@ import {
  * offline spec) that hasn't been done yet.
  * ------------------------------------------------------------------
  */
-
-const BACKOFF_SCHEDULE_MS = [30_000, 120_000, 300_000, 900_000, 1_800_000]; // 30s, 2m, 5m, 15m, 30m
-
-const nextBackoffDelay = (attempts: number): number =>
-  BACKOFF_SCHEDULE_MS[Math.min(attempts, BACKOFF_SCHEDULE_MS.length - 1)];
 
 const ENTITIES_READY_TO_SYNC: SyncQueueEntry['entityType'][] = ['sale', 'debt', 'debtPayment', 'expense', 'customer', 'printJob'];
 
@@ -73,7 +69,7 @@ async function pushDebt(localId: string): Promise<void> {
   if (!client) throw new Error('Supabase not configured');
   const record = await offlineDb.debts.get(localId);
   if (!record) return;
-  const { error } = await client.from('pos_debts').upsert({ id: localId, ...record.payload });
+  const { error } = await client.from('pos_debts').upsert({ ...record.payload, id: localId, shop_id: record.shopId });
   if (error) throw error;
 }
 
@@ -82,7 +78,7 @@ async function pushExpense(localId: string): Promise<void> {
   if (!client) throw new Error('Supabase not configured');
   const record = await offlineDb.expenses.get(localId);
   if (!record) return;
-  const { error } = await client.from('pos_expenses').upsert({ id: localId, ...record.payload });
+  const { error } = await client.from('pos_expenses').upsert({ ...record.payload, id: localId, shop_id: record.shopId });
   if (error) throw error;
 }
 
@@ -91,7 +87,7 @@ async function pushCustomer(localId: string): Promise<void> {
   if (!client) throw new Error('Supabase not configured');
   const record = await offlineDb.customers.get(localId);
   if (!record) return;
-  const { error } = await client.from('pos_customers').upsert({ id: localId, ...record.payload });
+  const { error } = await client.from('pos_customers').upsert({ ...record.payload, id: localId, shop_id: record.shopId });
   if (error) throw error;
 }
 
@@ -101,16 +97,26 @@ async function pushPrintJob(localId: string): Promise<void> {
   const record = await offlineDb.printJobs.get(localId);
   if (!record) return;
   // Upsert by the device-generated id: re-sending can never create a second job row.
-  const { error } = await client.from('print_jobs').upsert({ ...record.payload, id: localId }, { onConflict: 'id' });
+  const { error } = await client.from('print_jobs').upsert({ ...record.payload, id: localId, shop_id: record.shopId }, { onConflict: 'id' });
   if (error) throw error;
 }
 
+let inFlight: Promise<{ succeeded: number; failed: number; skipped: number }> | null = null;
+
 /**
- * Processes every due queue entry once. Safe to call repeatedly (e.g. on
- * an interval, on reconnect, or via the manual Sync Now button) - each
- * call only touches entries whose backoff window has actually elapsed.
+ * Processes every due queue entry once. Safe to call repeatedly (interval, reconnect, Sync Now,
+ * after a sale): overlapping calls share one run, so the same job is never pushed by two loops.
+ * Each entry is only marked synced AFTER the server confirms the write.
  */
-export async function processSyncQueue(): Promise<{ succeeded: number; failed: number; skipped: number }> {
+export function processSyncQueue(): Promise<{ succeeded: number; failed: number; skipped: number }> {
+  if (inFlight) return inFlight;
+  inFlight = runSyncQueue().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+async function runSyncQueue(): Promise<{ succeeded: number; failed: number; skipped: number }> {
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
@@ -119,11 +125,19 @@ export async function processSyncQueue(): Promise<{ succeeded: number; failed: n
     return { succeeded, failed, skipped };
   }
 
+  // Entries left in 'syncing' by a tab that closed mid-request would otherwise never be picked up again.
+  const nowMs = Date.now();
+  const stranded = await offlineDb.syncQueue.where('status').equals('syncing').filter((e) => isStaleSyncing(e, nowMs)).toArray();
+  for (const e of stranded) {
+    await offlineDb.syncQueue.update(e.id!, { status: 'pending', nextAttemptAt: new Date(nowMs).toISOString() });
+  }
+
   const now = new Date().toISOString();
   const dueEntries = await offlineDb.syncQueue
     .where('status')
     .anyOf('pending', 'failed')
-    .filter((entry) => entry.nextAttemptAt <= now)
+    // 'permanent' failures are not auto-retried; they wait for retryFailedEntries() after the cause is fixed.
+    .filter((entry) => entry.nextAttemptAt <= now && entry.errorKind !== 'permanent')
     .toArray();
 
   for (const entry of dueEntries) {
@@ -135,6 +149,10 @@ export async function processSyncQueue(): Promise<{ succeeded: number; failed: n
     await offlineDb.syncQueue.update(entry.id!, { status: 'syncing', lastAttemptAt: now });
 
     try {
+      if (entry.operation !== 'CREATE') {
+        // Only create/upsert is implemented. Never pretend an UPDATE/DELETE reached the server.
+        throw Object.assign(new Error(`Unsupported sync operation ${entry.operation} for ${entry.entityType}`), { code: 'PGRST204' });
+      }
       switch (entry.entityType) {
         case 'sale':
           await pushSale(entry.entityLocalId);
@@ -160,18 +178,24 @@ export async function processSyncQueue(): Promise<{ succeeded: number; failed: n
           break;
       }
 
-      await offlineDb.syncQueue.update(entry.id!, { status: 'synced' });
+      await offlineDb.syncQueue.update(entry.id!, { status: 'synced', errorMessage: undefined, errorKind: undefined });
       succeeded++;
     } catch (err) {
       const attempts = entry.attempts + 1;
-      const delay = nextBackoffDelay(attempts);
+      const classified = classifySyncError(err);
+      // 'blocked' (auth/subscription) retries at the slowest cadence; 'permanent' stops auto-retry.
+      const delay = classified.kind === 'blocked' ? nextBackoffDelay(99) : nextBackoffDelay(attempts);
       const nextAttemptAt = new Date(Date.now() + delay).toISOString();
       await offlineDb.syncQueue.update(entry.id!, {
         status: 'failed',
         attempts,
         nextAttemptAt,
-        errorMessage: err instanceof Error ? err.message : 'Unknown sync error',
+        errorMessage: classified.message,
+        errorKind: classified.kind,
       });
+      // Reflect the failure on the record itself so the UI counts it as failed, not pending.
+      const table = tableFor(entry.entityType);
+      if (table) await table.update(entry.entityLocalId, { syncStatus: 'failed' } as never).catch(() => 0);
       failed++;
     }
   }
@@ -181,6 +205,41 @@ export async function processSyncQueue(): Promise<{ succeeded: number; failed: n
   }
 
   return { succeeded, failed, skipped };
+}
+
+function tableFor(type: SyncQueueEntry['entityType']) {
+  switch (type) {
+    case 'sale': return offlineDb.sales;
+    case 'debt': return offlineDb.debts;
+    case 'expense': return offlineDb.expenses;
+    case 'customer': return offlineDb.customers;
+    case 'printJob': return offlineDb.printJobs;
+    default: return null;
+  }
+}
+
+/** Makes every failed (including permanent) entry eligible again - use after applying a migration or signing in. */
+export async function retryFailedEntries(): Promise<number> {
+  const failed = await offlineDb.syncQueue.where('status').equals('failed').toArray();
+  const nowIso = new Date().toISOString();
+  for (const e of failed) {
+    await offlineDb.syncQueue.update(e.id!, { status: 'pending', nextAttemptAt: nowIso, errorKind: undefined });
+  }
+  return failed.length;
+}
+
+/**
+ * Removes a sale that was deleted locally from the offline store AND the queue so a still-pending
+ * job can never "resurrect" it in the cloud. Scoped by shop and receipt. Returns how many local
+ * offline sales were removed.
+ */
+export async function purgeOfflineSaleByReceipt(shopId: string, receipt: string): Promise<number> {
+  const rows = await offlineDb.sales.where('shopId').equals(shopId).filter((r) => r.receipt === receipt).toArray();
+  for (const r of rows) {
+    await offlineDb.syncQueue.where('entityLocalId').equals(r.localId).delete();
+    await offlineDb.sales.delete(r.localId);
+  }
+  return rows.length;
 }
 
 /** Enqueues a piece of offline work. Called by the entity-specific "create while offline" helpers (Stage B). */

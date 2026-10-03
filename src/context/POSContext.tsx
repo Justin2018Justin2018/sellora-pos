@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   BusinessMode,
   BusinessProfile,
@@ -33,7 +33,9 @@ import {
   TaxRule
 } from '../types/pos';
 import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
-import { enqueueSync, processSyncQueue } from '../services/syncEngine';
+import { enqueueSync, processSyncQueue, purgeOfflineSaleByReceipt } from '../services/syncEngine';
+import { nextReceiptNumber } from '../utils/receipt';
+import { addMoney, subMoney, proportionalMoney, isValidAmount, exceedsBalance } from '../utils/money';
 import { checkRealConnectivity } from '../services/connectivity';
 import {
   getCurrentTenantId,
@@ -402,6 +404,27 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const tid = getCurrentTenantId();
     return safeStorageGet(getTenantKeyStatic(tid, 'wastage'), []);
   });
+  // Receipt numbers issued during this session. State updates are asynchronous, so two sales created in the
+  // same tick would otherwise both see the same "existing" list and mint the same receipt number.
+  const issuedReceiptsRef = useRef<Set<string>>(new Set());
+  const issueReceipt = (
+    prefix: string,
+    width: number,
+    existing: Array<string | undefined>,
+    datePart?: string
+  ): string => {
+    const receipt = nextReceiptNumber({
+      prefix,
+      datePart,
+      width,
+      existing: [...existing, ...issuedReceiptsRef.current],
+    });
+    issuedReceiptsRef.current.add(receipt);
+    return receipt;
+  };
+  // Guards against a double-clicked / re-submitted checkout creating the same sale twice.
+  const lastCyberSaleRef = useRef<{ sig: string; at: number; tx: Transaction } | null>(null);
+
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const tid = getCurrentTenantId();
     return safeStorageGet(getTenantKeyStatic(tid, 'transactions'), isPrimaryTenantId(tid) ? INITIAL_TRANSACTIONS : []);
@@ -827,7 +850,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const recordGeneralSale = useCallback((sale: Omit<GeneralSale, 'id' | 'date' | 'receipt'>) => {
     const prefix = businessMode === 'cyber' ? 'CYB' : businessMode === 'gas' ? 'GAS' : businessMode === 'electronics' ? 'TCH' : 'GS';
-    const receiptNo = `${prefix}-${String(activeSales.length + 1).padStart(6, '0')}`;
+    const receiptNo = issueReceipt(prefix, 6, activeSales.map((x) => x.receipt));
     const newSale: GeneralSale = {
       ...sale,
       id: Date.now(),
@@ -956,7 +979,10 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 if (remoteTx && remoteTx.length > 0) {
                   setTransactions((prev) => {
                     const existingIds = new Set(prev.map((t) => t.id));
-                    const newItems = remoteTx.filter((t) => !existingIds.has(t.id));
+                    const existingReceipts = new Set(prev.map((t) => t.receipt).filter(Boolean));
+                    const newItems = remoteTx.filter(
+                      (t) => !existingIds.has(t.id) && !(t.receipt && existingReceipts.has(t.receipt))
+                    );
                     if (newItems.length > 0) {
                       return [...newItems, ...prev];
                     }
@@ -1921,7 +1947,14 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentShopId, currentUser]);
 
   const recordCyberSale = (saleData: Omit<Transaction, 'id' | 'receipt' | 'date' | 'staff' | 'shopId'>): Transaction => {
-    const receiptNum = `MJRC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(transactions.length + 1).padStart(5, '0')}`;
+    const saleSig = JSON.stringify(saleData);
+    const nowMs = Date.now();
+    const lastSale = lastCyberSaleRef.current;
+    if (lastSale && lastSale.sig === saleSig && nowMs - lastSale.at < 2500) {
+      addToast({ type: 'info', title: 'Duplicate Submission Ignored', message: `Receipt ${lastSale.tx.receipt} was already recorded.` });
+      return lastSale.tx;
+    }
+    const receiptNum = issueReceipt('MJRC', 5, transactions.map((x) => x.receipt), new Date().toISOString().slice(0, 10).replace(/-/g, ''));
     const newTx: Transaction = {
       ...saleData,
       id: Date.now(),
@@ -1932,6 +1965,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'completed',
     };
 
+    lastCyberSaleRef.current = { sig: saleSig, at: nowMs, tx: newTx };
     setTransactions((prev) => [newTx, ...prev]);
     queueSaleForSync(newTx);
 
@@ -2040,8 +2074,13 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTransactions((prev) => prev.filter((t) => t.id !== id));
 
     // Delete from Supabase if configured
+    // A sale still waiting in the offline queue must be purged too, or it would be pushed to the cloud
+    // (resurrected) after the user deleted it.
+    purgeOfflineSaleByReceipt(currentShopId, target.receipt).catch((err) => {
+      console.warn('Could not purge offline copy of deleted sale:', err);
+    });
     if (isSupabaseConfigured()) {
-      deleteTransactionFromSupabase(id).catch((err) => {
+      deleteTransactionFromSupabase(currentShopId, target.receipt, target.date).catch((err) => {
         console.warn('Supabase delete error:', err);
       });
     }
@@ -2060,7 +2099,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Gas Refills
   const recordGasRefill = (refillData: Omit<GasTransaction, 'id' | 'receipt' | 'date' | 'staff' | 'shopId'>): GasTransaction => {
-    const receiptNum = `GAS-${String(gasTransactions.length + 1).padStart(6, '0')}`;
+    const receiptNum = issueReceipt('GAS', 6, gasTransactions.map((x) => x.receipt));
     const newGas: GasTransaction = {
       ...refillData,
       id: Date.now(),
@@ -2169,7 +2208,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const recordElectronicsSale = (saleData: Omit<ElectronicsSale, 'id' | 'receipt' | 'date' | 'staff'>): ElectronicsSale => {
-    const receiptNum = `EL-${String(electronicsSales.length + 1).padStart(6, '0')}`;
+    const receiptNum = issueReceipt('EL', 6, electronicsSales.map((x) => x.receipt));
     const newSale: ElectronicsSale = {
       ...saleData,
       id: Date.now(),
@@ -2317,26 +2356,31 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Latest debts, updated synchronously on every payment: two quick submissions in the same render
+  // would otherwise both validate against the same stale balance and the debt could be paid twice.
+  const debtsRef = useRef<DebtRecord[]>(debts);
+  debtsRef.current = debts;
+
   const recordDebtPayment = (id: number, amount: number): boolean => {
-    const debt = debts.find((d) => d.id === id);
+    const debt = debtsRef.current.find((d) => d.id === id);
     if (!debt) return false;
-    const balance = debt.original - debt.paid;
-    if (amount <= 0 || amount > balance) {
+    const balance = subMoney(debt.original, debt.paid);
+    if (!isValidAmount(amount) || exceedsBalance(amount, balance)) {
       addToast({ type: 'error', title: 'Invalid Payment Amount', message: `Outstanding balance is ${formatMoney(balance)}` });
       return false;
     }
 
-    const ratio = amount / debt.original;
-    const recognizedProfit = ((debt.original - (debt.materialTotal || 0)) * ratio);
+    const recognizedProfit = proportionalMoney(subMoney(debt.original, debt.materialTotal || 0), amount, debt.original);
+    debtsRef.current = debtsRef.current.map((d) => (d.id === id ? { ...d, paid: addMoney(d.paid, amount) } : d));
 
     setDebts((prev) =>
       prev.map((d) => {
         if (d.id === id) {
-          const newPaid = d.paid + amount;
+          const newPaid = addMoney(d.paid, amount);
           return {
             ...d,
             paid: newPaid,
-            profitRecognized: (d.profitRecognized || 0) + recognizedProfit,
+            profitRecognized: addMoney(d.profitRecognized || 0, recognizedProfit),
             lastPaymentDate: new Date().toISOString(),
             payments: [
               ...(d.payments || []),
@@ -2354,7 +2398,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If it's a cyber debt, log a transaction for the received cash payment
     if (debt.kind === 'cyber') {
-      const receiptNum = `RCP-DEBT-${String(transactions.length + 1).padStart(5, '0')}`;
+      const receiptNum = issueReceipt('RCP-DEBT', 5, transactions.map((x) => x.receipt));
       const paymentTx: Transaction = {
         id: Date.now(),
         receipt: receiptNum,

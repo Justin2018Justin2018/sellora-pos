@@ -89,6 +89,10 @@ export const getSupabase = (): SupabaseClient | null => {
  * ------------------------------------------------------------------
  */
 
+/** True if a claim_shop failure means the shop already has an owner (including losing a concurrent race). */
+const isAlreadyClaimedError = (message: string): boolean =>
+  message.includes('already claimed') || message.includes('uq_shop_members_one_owner') || message.includes('duplicate key');
+
 export interface SupabaseAuthResult {
   success: boolean;
   message: string;
@@ -141,7 +145,7 @@ export const signUpShopAccount = async (
     return {
       success: false,
       message:
-        memberError.message.includes('already claimed')
+        isAlreadyClaimedError(memberError.message)
           ? 'This shop is already registered. Ask the shop owner to add you as staff instead of signing up again.'
           : `Account created but could not link to shop: ${memberError.message}`,
     };
@@ -281,7 +285,7 @@ export const claimAdditionalBusiness = async (
   if (error) {
     return {
       success: false,
-      message: error.message.includes('already claimed')
+      message: isAlreadyClaimedError(error.message)
         ? 'That business name is already taken. Try a slightly different name.'
         : `Could not create business: ${error.message}`,
     };
@@ -304,7 +308,7 @@ export const claimShopForCurrentUser = async (shopId: string): Promise<SupabaseA
   if (error) {
     return {
       success: false,
-      message: error.message.includes('already claimed')
+      message: isAlreadyClaimedError(error.message)
         ? 'That Shop ID is already registered to another account. Choose a different Shop ID, or ask that shop\'s owner to add you as staff.'
         : `Could not link shop: ${error.message}`,
     };
@@ -381,6 +385,17 @@ export const syncTransactionToSupabase = async (
   if (!client) return false;
 
   try {
+    // The offline queue pushes the same sale under a device-generated UUID. Skip if this receipt is
+    // already in the cloud for this shop, otherwise a manual "Sync now" would store the sale twice.
+    if (tx.receipt) {
+      const { data: already, error: lookupError } = await client
+        .from('pos_transactions')
+        .select('id')
+        .eq('shop_id', shopId)
+        .eq('receipt', tx.receipt)
+        .limit(1);
+      if (!lookupError && already && already.length > 0) return true;
+    }
     const { error } = await client.from('pos_transactions').upsert({
       id: tx.id,
       receipt: tx.receipt,
@@ -511,6 +526,13 @@ export const syncDebtToSupabase = async (
   }
 };
 
+/** Deterministic positive 31-bit integer for a non-numeric (UUID) cloud id, so pulled rows get a stable local id. */
+const stableNumericId = (text: string): number => {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return Math.abs(h) || 1;
+};
+
 /**
  * Pull transactions from Supabase
  */
@@ -530,8 +552,21 @@ export const fetchTransactionsFromSupabase = async (
       return null;
     }
 
-    return data.map((row: any) => ({
-      id: Number(row.id),
+    return data.map((row: any): Transaction => {
+      // Rows pushed by the offline queue carry the full original sale in `payload` and a UUID id.
+      // Number(uuid) is NaN, which defeats id-based de-duplication and double-counts the sale.
+      const payload = row.payload && typeof row.payload === 'object' ? (row.payload as Partial<Transaction>) : null;
+      const numericId = Number(row.id);
+      const id = Number.isFinite(numericId)
+        ? numericId
+        : Number.isFinite(Number(payload?.id))
+          ? Number(payload?.id)
+          : stableNumericId(String(row.id));
+      if (payload) {
+        return { ...(payload as Transaction), id, receipt: row.receipt ?? payload.receipt ?? '' };
+      }
+      return {
+      id,
       receipt: row.receipt,
       date: row.date,
       customer: row.customer,
@@ -550,7 +585,8 @@ export const fetchTransactionsFromSupabase = async (
       staff: row.staff,
       notes: row.notes || undefined,
       status: row.status,
-    }));
+      };
+    });
   } catch (err) {
     console.warn('Error fetching from Supabase:', err);
     return null;
@@ -560,12 +596,20 @@ export const fetchTransactionsFromSupabase = async (
 /**
  * Deletes a transaction from Supabase cloud database
  */
-export const deleteTransactionFromSupabase = async (id: number): Promise<boolean> => {
+export const deleteTransactionFromSupabase = async (
+  shopId: string,
+  receipt: string,
+  date?: string
+): Promise<boolean> => {
   const client = getSupabase();
   if (!client) return false;
 
   try {
-    const { error } = await client.from('pos_transactions').delete().eq('id', id);
+    // Scoped by shop + receipt (+ timestamp when known). The numeric local id does not match rows that
+    // the offline queue stored under a UUID, and an unscoped delete-by-id must never be relied on.
+    let query = client.from('pos_transactions').delete().eq('shop_id', shopId).eq('receipt', receipt);
+    if (date) query = query.eq('date', date);
+    const { error } = await query;
     if (error) {
       console.warn('Failed to delete transaction from Supabase:', error.message);
       return false;

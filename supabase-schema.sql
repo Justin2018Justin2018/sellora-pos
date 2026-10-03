@@ -174,30 +174,20 @@ ALTER TABLE saas_tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saas_subscription_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saas_plans ENABLE ROW LEVEL SECURITY;
 
--- Base Tenant Isolation Policies (Ensure Shop A never sees Shop B)
+-- Base policies: DENY BY DEFAULT.
+-- RLS is enabled above and NO permissive policies are created here on purpose.
+-- (This file used to create `FOR ALL USING (true) WITH CHECK (true)` policies for every table, which lets
+-- anyone holding the public anon key read/write every shop's data - and re-running this file on a secured
+-- database would silently re-open it.) Access policies are created by supabase-schema-v2-security-fix.sql
+-- and tightened by supabase-schema-v5-hardening.sql. Only the public plan catalogue is readable here.
 DROP POLICY IF EXISTS "Allow anon all on pos_transactions" ON pos_transactions;
-CREATE POLICY "Allow anon all on pos_transactions" ON pos_transactions FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow anon all on pos_stock" ON pos_stock;
-CREATE POLICY "Allow anon all on pos_stock" ON pos_stock FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow anon all on pos_expenses" ON pos_expenses;
-CREATE POLICY "Allow anon all on pos_expenses" ON pos_expenses FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow anon all on pos_debts" ON pos_debts;
-CREATE POLICY "Allow anon all on pos_debts" ON pos_debts FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow anon all on pos_customers" ON pos_customers;
-CREATE POLICY "Allow anon all on pos_customers" ON pos_customers FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Allow anon all on pos_family_expenses" ON pos_family_expenses;
-CREATE POLICY "Allow anon all on pos_family_expenses" ON pos_family_expenses FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all on saas_tenants" ON saas_tenants;
+DROP POLICY IF EXISTS "Allow all on saas_subscription_audit" ON saas_subscription_audit;
 
 DROP POLICY IF EXISTS "Allow read on saas_plans" ON saas_plans;
 CREATE POLICY "Allow read on saas_plans" ON saas_plans FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "Allow all on saas_tenants" ON saas_tenants;
-CREATE POLICY "Allow all on saas_tenants" ON saas_tenants FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Allow all on saas_subscription_audit" ON saas_subscription_audit;
-CREATE POLICY "Allow all on saas_subscription_audit" ON saas_subscription_audit FOR ALL USING (true) WITH CHECK (true);
