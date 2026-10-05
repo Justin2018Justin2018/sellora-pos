@@ -64,6 +64,7 @@ export interface SubscriptionPlanConfig {
   features: string[];
   description: string;
   badge?: string;
+  isPopular?: boolean;
 }
 
 export interface SubscriptionAuditEntry {

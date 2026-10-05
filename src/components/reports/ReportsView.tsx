@@ -1,3 +1,4 @@
+import { saleCost } from '../../utils/finance';
 import React, { useState, useMemo, useRef } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { Transaction, Expense } from '../../types/pos';
@@ -233,7 +234,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
     }> = [];
 
     periodCyberSales.forEach((t) => {
-      const itemsList = t.items && t.items.length > 0 ? t.items.map((i) => `${i.qty}x ${i.name}`).join(', ') : '';
+      const itemsList = t.services && t.services.length > 0 ? t.services.map((i) => `${i.qty}x ${i.service}`).join(', ') : '';
       list.push({
         id: t.id,
         type: 'cyber',
@@ -244,7 +245,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
         party: t.customer || 'Walk-in Customer',
         payment: t.payment || 'Cash',
         grossAmount: t.total,
-        cogsAmount: t.materialTotal || 0,
+        cogsAmount: saleCost(t),
         netImpact: t.total - (t.materialTotal || 0),
         raw: t,
       });
@@ -1101,9 +1102,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onOpenReceipt }) => {
                               {entry.party}
                             </span>
                           </div>
-                          {entry.staff && entry.staff !== entry.party && (
+                          {entry.raw?.staff && entry.raw.staff !== entry.party && (
                             <span className="text-[10px] text-slate-400 block truncate">
-                              By: {entry.staff}
+                              By: {entry.raw.staff}
                             </span>
                           )}
                         </td>

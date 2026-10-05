@@ -6,6 +6,7 @@ import {
   DebtRecord,
   Customer
 } from '../types/pos';
+import { classifyRpcError, RemoteDeleteResponse } from '../utils/adminAuth';
 
 // Read client credentials lazily from environment
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
@@ -621,3 +622,105 @@ export const deleteTransactionFromSupabase = async (
   }
 };
 
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Server-verified admin authorization (requires supabase-schema-v6-admin-authorization.sql).
+// The password is sent to Postgres over TLS and compared there against a bcrypt hash; it is never stored in the browser
+// by these functions and the browser can never read the hash.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** True when a Supabase session exists (the RPCs below only work for an authenticated shop member). */
+export const hasSupabaseSession = async (): Promise<boolean> => {
+  const client = getSupabase();
+  if (!client) return false;
+  try {
+    const { data } = await client.auth.getSession();
+    return !!data?.session;
+  } catch {
+    return false;
+  }
+};
+
+/** Deletes one sale through the audited server function. Never throws; transport/DB problems are classified. */
+export const adminDeleteTransactionRemote = async (
+  shopId: string,
+  receipt: string,
+  date: string | undefined,
+  reason: string | undefined,
+  secret: string
+): Promise<RemoteDeleteResponse> => {
+  const client = getSupabase();
+  if (!client) return { status: 'not_signed_in' };
+  try {
+    const { data, error } = await client.rpc('admin_delete_transaction', {
+      p_shop_id: shopId,
+      p_receipt: receipt,
+      p_date: date ?? null,
+      p_reason: reason ?? null,
+      p_secret: secret,
+    });
+    if (error) return classifyRpcError(error);
+    return (data ?? { status: 'server_error', message: 'Empty response' }) as RemoteDeleteResponse;
+  } catch (err: any) {
+    return classifyRpcError({ message: String(err?.message || err) });
+  }
+};
+
+export const getShopAdminSecretStatus = async (
+  shopId: string
+): Promise<{ status: string; configured?: boolean; message?: string }> => {
+  const client = getSupabase();
+  if (!client) return { status: 'not_signed_in' };
+  try {
+    const { data, error } = await client.rpc('shop_admin_secret_status', { p_shop_id: shopId });
+    if (error) return classifyRpcError(error);
+    return data as any;
+  } catch (err: any) {
+    return classifyRpcError({ message: String(err?.message || err) });
+  }
+};
+
+/** Owner only. `current` is required once a server password already exists. */
+export const setShopAdminSecretRemote = async (
+  shopId: string,
+  next: string,
+  current?: string
+): Promise<RemoteDeleteResponse> => {
+  const client = getSupabase();
+  if (!client) return { status: 'not_signed_in' };
+  try {
+    const { data, error } = await client.rpc('set_shop_admin_secret', {
+      p_shop_id: shopId,
+      p_new: next,
+      p_current: current ?? null,
+    });
+    if (error) return classifyRpcError(error);
+    return data as RemoteDeleteResponse;
+  } catch (err: any) {
+    return classifyRpcError({ message: String(err?.message || err) });
+  }
+};
+
+/** Cancels (voids) a synced sale through the audited server function (supabase-schema-v7). Never throws. */
+export const adminVoidTransactionRemote = async (
+  shopId: string,
+  receipt: string,
+  date: string | undefined,
+  reason: string
+): Promise<RemoteDeleteResponse> => {
+  const client = getSupabase();
+  if (!client) return { status: 'not_signed_in' };
+  try {
+    const { data, error } = await client.rpc('admin_void_transaction', {
+      p_shop_id: shopId,
+      p_receipt: receipt,
+      p_date: date ?? null,
+      p_reason: reason,
+    });
+    if (error) return classifyRpcError(error);
+    return (data ?? { status: 'server_error', message: 'Empty response' }) as RemoteDeleteResponse;
+  } catch (err: any) {
+    return classifyRpcError({ message: String(err?.message || err) });
+  }
+};

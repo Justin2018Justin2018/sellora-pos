@@ -41,8 +41,11 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   UPDATE pos_transactions SET service = 'hacked' WHERE id = 'tx-b-1';
   GET DIAGNOSTICS n = ROW_COUNT; IF n <> 0 THEN RAISE EXCEPTION 'FAIL: owner A updated shop B row'; END IF;
-  DELETE FROM pos_transactions WHERE id = 'tx-b-1';
-  GET DIAGNOSTICS n = ROW_COUNT; IF n <> 0 THEN RAISE EXCEPTION 'FAIL: owner A deleted shop B row'; END IF;
+  -- v6 revokes DELETE from API roles entirely (privilege error); on a pre-v6 DB RLS yields 0 rows. Either means "not deleted".
+  BEGIN
+    DELETE FROM pos_transactions WHERE id = 'tx-b-1';
+    GET DIAGNOSTICS n = ROW_COUNT; IF n <> 0 THEN RAISE EXCEPTION 'FAIL: owner A deleted shop B row'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 
 -- 3. owner A cannot move own row to shop B (shop_id immutable)
@@ -79,8 +82,10 @@ SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000c
 DO $$ DECLARE n int; BEGIN
   IF (SELECT count(*) FROM pos_transactions WHERE shop_id = 't_shop_a') < 1 THEN RAISE EXCEPTION 'FAIL: staff cannot read own shop'; END IF;
   INSERT INTO pos_transactions (id, receipt, service, shop_id) VALUES ('tx-a-2','R-A-2','svc','t_shop_a');
-  DELETE FROM pos_transactions WHERE id = 'tx-a-2';
-  GET DIAGNOSTICS n = ROW_COUNT; IF n <> 0 THEN RAISE EXCEPTION 'FAIL: staff deleted a sale'; END IF;
+  BEGIN
+    DELETE FROM pos_transactions WHERE id = 'tx-a-2';
+    GET DIAGNOSTICS n = ROW_COUNT; IF n <> 0 THEN RAISE EXCEPTION 'FAIL: staff deleted a sale'; END IF;
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 
 -- 7. duplicate receipt in the same shop is rejected - ONLY if the optional unique index was enabled

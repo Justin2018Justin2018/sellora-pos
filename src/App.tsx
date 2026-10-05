@@ -6,6 +6,7 @@ import { SyncStatusWidget } from './components/common/SyncStatusWidget';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { TabKey } from './components/layout/Navigation';
+import { gasRefillToTransaction } from './utils/gasReceiptAdapter';
 import { LowStockBanner } from './components/common/LowStockBanner';
 import { ToastContainer } from './components/common/ToastContainer';
 import { DocRequestModal } from './components/common/DocRequestModal';
@@ -238,11 +239,11 @@ const MainApp: React.FC = () => {
                 onSelectTransaction={(tx) => setSelectedReceipt(tx)}
               />
             ) : businessMode === 'gas' ? (
-              <GasView />
+              <GasView onOpenGasReceipt={(g) => setSelectedReceipt(gasRefillToTransaction(g))} />
             ) : businessMode === 'electronics' ? (
               <ElectronicsView onSaleCompleted={(tx) => setSelectedReceipt(tx)} />
             ) : (
-              <GeneralDashboardView onNavigateTab={setActiveTab} />
+              <GeneralDashboardView onNavigateTab={(tab) => setActiveTab(tab as TabKey)} />
             )
           )}
 
@@ -257,7 +258,7 @@ const MainApp: React.FC = () => {
             )
           )}
 
-          {activeTab === 'gas' && <GasView />}
+          {activeTab === 'gas' && <GasView onOpenGasReceipt={(g) => setSelectedReceipt(gasRefillToTransaction(g))} />}
           {activeTab === 'electronics' && <ElectronicsView onSaleCompleted={(tx) => setSelectedReceipt(tx)} />}
 
           {activeTab === 'general_products' && <GeneralProductsView />}

@@ -436,7 +436,7 @@ export const DebtsView: React.FC = () => {
               Record Debt Payment
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              Debtor: <strong className="text-slate-900 dark:text-white">{payingDebt.customer}</strong> • Remaining:{' '}
+              Debtor: <strong className="text-slate-900 dark:text-white">{payingDebt.name}</strong> • Remaining:{' '}
               <strong className="text-amber-600 font-mono">
                 {formatMoney(Math.max(0, payingDebt.original - payingDebt.paid))}
               </strong>

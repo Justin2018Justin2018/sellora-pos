@@ -370,7 +370,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={tab.key}
-              onClick={() => handleTabClick(tab.key)}
+              onClick={() => handleTabClick(tab.key as TabKey)}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors text-left cursor-pointer group ${
                 isActive
                   ? 'bg-blue-600/15 border-l-4 border-blue-500 text-blue-400 font-semibold'

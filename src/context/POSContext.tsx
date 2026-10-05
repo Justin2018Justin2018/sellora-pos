@@ -33,7 +33,8 @@ import {
   TaxRule
 } from '../types/pos';
 import { offlineDb, generateLocalId, getDeviceId } from '../services/offlineDb';
-import { enqueueSync, processSyncQueue, purgeOfflineSaleByReceipt } from '../services/syncEngine';
+import { enqueueSync, processSyncQueue, purgeOfflineSaleByReceipt, isLocalOnlySale } from '../services/syncEngine';
+import { checkLocalAdminSecret, authorizeSaleDeletion, failure, voidFailureMessage, DeleteOutcome } from '../utils/adminAuth';
 import { nextReceiptNumber } from '../utils/receipt';
 import { addMoney, subMoney, proportionalMoney, isValidAmount, exceedsBalance } from '../utils/money';
 import { checkRealConnectivity } from '../services/connectivity';
@@ -56,7 +57,9 @@ import {
   syncDebtToSupabase,
   fetchTransactionsFromSupabase,
   testSupabaseConnection,
-  deleteTransactionFromSupabase
+  adminDeleteTransactionRemote,
+  adminVoidTransactionRemote,
+  hasSupabaseSession
 } from '../services/supabase';
 import {
   DEFAULT_BUSINESS_PROFILE,
@@ -149,8 +152,8 @@ interface POSContextType {
   transactions: Transaction[];
   recordCyberSale: (sale: Omit<Transaction, 'id' | 'receipt' | 'date' | 'staff' | 'shopId'>) => Transaction;
   editTransaction: (id: number, updates: Partial<Transaction>) => boolean;
-  cancelTransaction: (id: number, reason?: string) => boolean;
-  deleteTransaction: (id: number, password?: string) => boolean;
+  cancelTransaction: (id: number | string, reason?: string) => Promise<boolean>;
+  deleteTransaction: (id: number, password?: string) => Promise<DeleteOutcome>;
   verifyAdminPassword: (password: string) => boolean;
   updateAdminPassword: (currentPass: string, newPass: string) => { success: boolean; message: string };
 
@@ -1485,31 +1488,13 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const verifyAdminPassword = useCallback((password: string): boolean => {
-    if (!password) return false;
-    const cleanPass = password.trim();
-
-    // 1. Check profile configured admin password
-    const configuredAdminPass = profile.adminPassword || 'admin123';
-    if (cleanPass === configuredAdminPass) return true;
-
-    // 2. Check any active admin in staffList
-    const matchesAdminUser = staffList.some(
-      (u) => u.role === 'admin' && u.active && u.password === cleanPass
-    );
-    if (matchesAdminUser) return true;
-
-    // 3. Current user password if current user is admin/manager
-    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager') && currentUser.password === cleanPass) {
-      return true;
-    }
-
-    // NOTE: there used to be a 4th check here that accepted the literal
-    // strings 'admin123' / '1234' unconditionally, regardless of what
-    // the shop had actually configured. That meant changing your admin
-    // password never actually revoked the default - it was a permanent
-    // backdoor. It's removed: the ONLY way in now is a password that
-    // matches what's actually configured above.
-    return false;
+    // Single shared implementation (src/utils/adminAuth.ts). Both sides are trimmed, so a stray space stored or typed
+    // earlier can no longer produce a false "incorrect password". There is no backdoor literal.
+    return checkLocalAdminSecret(password, {
+      profileSecret: profile.adminPassword,
+      staff: staffList,
+      currentUser,
+    });
   }, [profile.adminPassword, staffList, currentUser]);
 
   const updateAdminPassword = (currentPass: string, newPass: string): { success: boolean; message: string } => {
@@ -1635,7 +1620,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProfile((prev) => {
       const existing = prev.taxRules || [];
       const updatedRules = rule.isDefault
-        ? existing.map((r) => ({ ...r, isDefault: false })).concat(newRule)
+        ? [...existing.map((r) => ({ ...r, isDefault: false })), newRule]
         : [...existing, newRule];
       return {
         ...prev,
@@ -2025,11 +2010,31 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
-  const cancelTransaction = (id: number, reason?: string): boolean => {
+  const cancelTransaction = async (id: number | string, reason?: string): Promise<boolean> => {
     if (!hasRole('admin')) {
       addToast({ type: 'error', title: 'Admin Permission Required to Cancel Sales' });
       return false;
     }
+    const target = transactions.find((t) => t.id === id);
+    if (!target) {
+      addToast({ type: 'error', title: 'Transaction Not Found' });
+      return false;
+    }
+    if (target.status === 'cancelled') return true; // already void: idempotent
+
+    // A synced sale is cancelled by the server first (owner-only, audited) so every device agrees; otherwise other
+    // devices would keep counting it as revenue. A sale that never left this device is cancelled locally.
+    let syncedLocallyOnly = false;
+    if (isSupabaseConfigured() && (await hasSupabaseSession()) && !(await isLocalOnlySale(currentShopId, target.receipt).catch(() => false))) {
+      const res = await adminVoidTransactionRemote(currentShopId, target.receipt, target.date, (reason || '').trim());
+      if (res.status === 'offline') {
+        syncedLocallyOnly = true;
+      } else if (res.status !== 'ok') {
+        addToast({ type: 'error', title: 'Sale Not Cancelled', message: voidFailureMessage(res) });
+        return false;
+      }
+    }
+
     setTransactions((prev) =>
       prev.map((t) =>
         t.id === id
@@ -2042,48 +2047,44 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       )
     );
     logAudit('CANCEL_TRANSACTION', `Cancelled transaction #${id}${reason ? ` (Reason: ${reason})` : ''}`);
-    addToast({ type: 'warning', title: 'Sale Cancelled', message: 'Transaction marked as void.' });
+    addToast(
+      syncedLocallyOnly
+        ? { type: 'warning', title: 'Cancelled On This Device Only', message: 'No connection: other devices still count this sale until it is cancelled while online.' }
+        : { type: 'warning', title: 'Sale Cancelled', message: 'Transaction marked as void.' }
+    );
     return true;
   };
 
-  const deleteTransaction = (id: number, password?: string): boolean => {
-    if (password !== undefined) {
-      if (!verifyAdminPassword(password)) {
-        addToast({
-          type: 'error',
-          title: 'Incorrect Password',
-          message: 'The entered admin password is incorrect. Deletion denied.',
-        });
-        return false;
-      }
-    } else if (!hasRole('admin')) {
-      addToast({
-        type: 'error',
-        title: 'Admin Password Required',
-        message: 'Administrator authorization and password required to delete transactions.',
-      });
-      return false;
-    }
-
+  const deleteTransaction = async (id: number, password?: string): Promise<DeleteOutcome> => {
     const target = transactions.find((t) => t.id === id);
     if (!target) {
-      addToast({ type: 'error', title: 'Transaction Not Found' });
-      return false;
+      const out = failure('not_found');
+      addToast({ type: 'error', title: 'Transaction Not Found', message: out.message });
+      return out;
+    }
+
+    // Authorization. Synced sales are verified and deleted by the server (audited, throttled); the browser can no
+    // longer "delete" a cloud sale on its own. See authorizeSaleDeletion for the exact rules and failure reasons.
+    const outcome = await authorizeSaleDeletion(password, {
+      cloudConfigured: isSupabaseConfigured(),
+      hasSession: hasSupabaseSession,
+      remoteDelete: (secret) =>
+        adminDeleteTransactionRemote(currentShopId, target.receipt, target.date, 'Deleted from POS', secret),
+      isLocalOnlySale: () => isLocalOnlySale(currentShopId, target.receipt).catch(() => false),
+      localCheck: verifyAdminPassword,
+    });
+
+    if (!outcome.ok) {
+      addToast({ type: 'error', title: 'Deletion Not Authorized', message: outcome.message });
+      return outcome;
     }
 
     setTransactions((prev) => prev.filter((t) => t.id !== id));
-
-    // Delete from Supabase if configured
     // A sale still waiting in the offline queue must be purged too, or it would be pushed to the cloud
     // (resurrected) after the user deleted it.
     purgeOfflineSaleByReceipt(currentShopId, target.receipt).catch((err) => {
       console.warn('Could not purge offline copy of deleted sale:', err);
     });
-    if (isSupabaseConfigured()) {
-      deleteTransactionFromSupabase(currentShopId, target.receipt, target.date).catch((err) => {
-        console.warn('Supabase delete error:', err);
-      });
-    }
 
     logAudit(
       'DELETE_TRANSACTION',
@@ -2094,7 +2095,7 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       title: 'Transaction Deleted',
       message: `Receipt ${target.receipt} was permanently deleted.`,
     });
-    return true;
+    return outcome;
   };
 
   // Gas Refills
@@ -2411,17 +2412,18 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             service: `Debt Payment: ${debt.service}`,
             qty: 1,
             price: amount,
-            material: 0,
+            material: subMoney(amount, recognizedProfit),
             total: amount,
-            materialTotal: 0,
+            materialTotal: subMoney(amount, recognizedProfit),
           },
         ],
         qty: 1,
         price: amount,
         subtotal: amount,
         total: amount,
-        material: 0,
-        materialTotal: 0,
+        // Cost recognised with this instalment, so revenue - cost === profit in every COGS-based report.
+        material: subMoney(amount, recognizedProfit),
+        materialTotal: subMoney(amount, recognizedProfit),
         paid: amount,
         change: 0,
         profit: recognizedProfit,

@@ -324,7 +324,7 @@ export const ElectronicsView: React.FC<ElectronicsViewProps> = ({ onSaleComplete
                 />
                 <button
                   type="button"
-                  onClick={handleBarcodeLookup}
+                  onClick={() => handleBarcodeLookup()}
                   className="px-3 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shrink-0"
                 >
                   Lookup

@@ -23,6 +23,7 @@ import {
   History,
 } from 'lucide-react';
 import { BusinessProfile } from '../../types/pos';
+import { ServerAdminPasswordCard } from './ServerAdminPasswordCard';
 import { BusinessTypeSelectionModal } from '../subscription/BusinessTypeSelectionModal';
 import { SubscriptionBillingModal } from '../subscription/SubscriptionBillingModal';
 import { getBusinessTypeConfig } from '../../data/businessTypes';
@@ -631,6 +632,7 @@ export const SettingsView: React.FC = () => {
               </button>
             </form>
           </div>
+          <ServerAdminPasswordCard />
           <div className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl border border-slate-800">
             <h3 className="text-sm font-bold flex items-center gap-2 mb-2">
               <KeyRound className="w-4 h-4 text-amber-400" />

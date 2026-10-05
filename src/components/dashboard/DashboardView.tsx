@@ -1,3 +1,4 @@
+import { sumSaleCosts } from '../../utils/finance';
 import React, { useState, useMemo } from 'react';
 import { usePOS } from '../../context/POSContext';
 import {
@@ -116,7 +117,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
 
   const totalMaterialCost = useMemo(
-    () => filteredSales.reduce((sum, t) => sum + (t.materialCost || 0), 0),
+    () => sumSaleCosts(filteredSales),
     [filteredSales]
   );
 
@@ -143,7 +144,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const topServiceData = useMemo(() => {
     const counts: Record<string, { count: number; revenue: number }> = {};
     transactions.forEach((tx) => {
-      if (tx.status === 'cancelled') return;
+      if (tx.status === 'cancelled' || tx.debtPayment) return; // a repayment is not a service sold
       if (!counts[tx.service]) {
         counts[tx.service] = { count: 0, revenue: 0 };
       }
@@ -153,7 +154,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     const entries = Object.entries(counts);
     if (entries.length === 0) {
-      return { name: 'KRA Returns & Services', count: 24, revenue: 14400 };
+      return { name: 'No sales yet', count: 0, revenue: 0 }; // never show invented figures
     }
     entries.sort((a, b) => b[1].revenue - a[1].revenue);
     return {
@@ -514,7 +515,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <button
               onClick={() => onQuickServiceSelect(topServiceData.name)}
-              className="w-full bg-white text-slate-900 py-2 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors cursor-pointer"
+              disabled={topServiceData.count === 0}
+              className="w-full bg-white text-slate-900 py-2 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Run Target Sale +
             </button>

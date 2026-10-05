@@ -242,6 +242,15 @@ export async function purgeOfflineSaleByReceipt(shopId: string, receipt: string)
   return rows.length;
 }
 
+/**
+ * True when the sale with this receipt exists ONLY in the offline store (not yet accepted by the server), so deleting it
+ * needs no server round-trip. A sale that has synced (syncStatus 'synced') or is unknown here is treated as a cloud sale.
+ */
+export async function isLocalOnlySale(shopId: string, receipt: string): Promise<boolean> {
+  const rows = await offlineDb.sales.where('shopId').equals(shopId).filter((r) => r.receipt === receipt).toArray();
+  return rows.length > 0 && rows.every((r) => r.syncStatus !== 'synced');
+}
+
 /** Enqueues a piece of offline work. Called by the entity-specific "create while offline" helpers (Stage B). */
 export async function enqueueSync(
   entityType: SyncQueueEntry['entityType'],

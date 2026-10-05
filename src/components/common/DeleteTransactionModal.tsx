@@ -147,8 +147,9 @@ export const DeleteTransactionModal: React.FC<DeleteTransactionModalProps> = ({
     family: 'Family Drawing',
   };
 
-  const handleDelete = (e: React.FormEvent) => {
+  const handleDelete = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return; // ignore double-clicks / repeated Enter while a request is in flight
     setErrorMessage('');
 
     if (!password.trim()) {
@@ -160,29 +161,34 @@ export const DeleteTransactionModal: React.FC<DeleteTransactionModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      let success = false;
-      if (resolvedType === 'gas') {
-        success = deleteGasRefill(Number(activeTarget.id), password);
-      } else if (resolvedType === 'electronics') {
-        success = deleteElectronicsSale(Number(activeTarget.id), password);
-      } else if (resolvedType === 'expense') {
-        success = deleteExpense(Number(activeTarget.id), password);
-      } else if (resolvedType === 'family') {
-        success = deleteFamilyExpense(activeTarget.id, password);
+      let ok = false;
+      let message = '';
+      if (resolvedType === 'gas' || resolvedType === 'electronics' || resolvedType === 'expense' || resolvedType === 'family') {
+        // Device-local record kinds (not synchronised to the server): checked against the local admin secret.
+        ok =
+          resolvedType === 'gas' ? deleteGasRefill(Number(activeTarget.id), password)
+          : resolvedType === 'electronics' ? deleteElectronicsSale(Number(activeTarget.id), password)
+          : resolvedType === 'expense' ? deleteExpense(Number(activeTarget.id), password)
+          : deleteFamilyExpense(activeTarget.id, password);
+        if (!ok) message = 'Incorrect administrator password. Please try again.';
       } else {
-        success = deleteTransaction(Number(activeTarget.id), password);
+        // Sales: the outcome carries the real reason (wrong password, locked, offline, not signed in, ...).
+        const outcome = await deleteTransaction(Number(activeTarget.id), password);
+        ok = outcome.ok;
+        message = outcome.message;
       }
 
-      if (success) {
+      if (ok) {
         if (onSuccess) onSuccess();
         onClose();
       } else {
-        setErrorMessage('Incorrect administrator password. Please try again.');
+        setErrorMessage(message);
         setIsSubmitting(false);
         inputRef.current?.select();
       }
-    } catch {
-      setErrorMessage('Failed to delete record. Please verify password and try again.');
+    } catch (err) {
+      console.error('Delete failed unexpectedly:', err);
+      setErrorMessage('The deletion could not be completed. Nothing was deleted. Please try again.');
       setIsSubmitting(false);
     }
   };
